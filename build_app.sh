@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Quit the app if it's running
+if pgrep -x "MXF2PRXY" > /dev/null; then
+    echo "Quitting running instance of MXF2PRXY..."
+    killall MXF2PRXY 2>/dev/null || true
+    sleep 0.5
+fi
+
 # Build
 swift build
 
@@ -24,7 +31,7 @@ cp /tmp/ffmpeg-static-cached MXF2PRXY.app/Contents/MacOS/ffmpeg
 # Copy icon and resources
 cp AppIcon.icns MXF2PRXY.app/Contents/Resources/
 cp -f MXF2Prxy-logo.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
-cp -f mxf2proxy.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
+cp -f watermark.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
 
 # Create Info.plist
 cat > MXF2PRXY.app/Contents/Info.plist << 'PLIST'
@@ -61,3 +68,7 @@ codesign -s - MXF2PRXY.app || true
 touch MXF2PRXY.app
 
 echo "App built successfully"
+
+# Launch the app
+echo "Launching MXF2PRXY..."
+open MXF2PRXY.app

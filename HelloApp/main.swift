@@ -42,6 +42,10 @@ class OrangeButton: NSButton {
     }
 }
 
+class FlippedView: NSView {
+    override var isFlipped: Bool { return true }
+}
+
 class DropView: NSView {
     var dropDelegate: DropViewDelegate?
     var isDropEnabled: Bool = true
@@ -151,9 +155,10 @@ protocol DropViewDelegate {
 }
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDelegate {
     var window: NSWindow?
-    var settingsWindow: NSWindow?
+    weak var settingsWindow: NSWindow?
+    weak var lutManagementWindow: NSWindow?
     private var formatButtons: [NSButton] = []
     private var modeButtons: [NSButton] = []
     private var dropView: DropView?
@@ -164,6 +169,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
     private var lutCheckbox: NSButton?
     private var lutSelectButton: NSButton?
     private var lutLabel: NSTextField?
+    private var dropLabel: NSTextField?
+    private var dropBorderLayer: CAShapeLayer?
+    private var gearButton: NSButton?
     private var selectedFormat: Int = 0
     private var selectedMode: Int = 0
     private var jobQueue: [URL] = []
@@ -190,17 +198,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
-        
+
+        // Determine initial mode FIRST
+        selectedFormat = UserDefaults.standard.integer(forKey: "selectedFormatSegment")
+        selectedMode = UserDefaults.standard.integer(forKey: "selectedModeSegment")
+        self.currentMode = selectedMode == 1 ? .night : (selectedMode == 2 ? .auto : .day)
+
+        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+
         let window = NSWindow(
             contentRect: NSRect(x: 100, y: 100, width: 600, height: 450),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        
+
         window.title = "MXF2Prxy"
-        window.appearance = NSAppearance(named: .vibrantDark)
-        
+        window.titlebarAppearsTransparent = true
+        window.isRestorable = false
+
+        // Set initial appearance and colors based on mode
+        let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
+        window.backgroundColor = titleBarColor
+
+        if #available(macOS 10.14, *) {
+            window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        }
+
         let formatLabel = NSTextField(labelWithString: "Output")
         formatLabel.frame = NSRect(x: 345, y: 366, width: 60, height: 20)
         self.formatLabel = formatLabel
@@ -218,11 +242,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
             formatButtons.append(btn)
             xPos += 80
         }
-        selectedFormat = UserDefaults.standard.integer(forKey: "selectedFormatSegment")
-        
-        selectedMode = UserDefaults.standard.integer(forKey: "selectedModeSegment")
-        self.currentMode = selectedMode == 1 ? .night : (selectedMode == 2 ? .auto : .day)
-        
+
         let button = OrangeButton(frame: NSRect(x: 200, y: 210, width: 200, height: 40))
         button.title = "Select files or folders"
         button.bezelStyle = .rounded
@@ -245,17 +265,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         let borderPath = CGPath(rect: dropView.bounds, transform: nil)
         borderLayer.path = borderPath
         borderLayer.fillColor = NSColor.clear.cgColor
-        borderLayer.strokeColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0).cgColor // #ff7c06
         borderLayer.lineWidth = 1.0
         borderLayer.lineDashPattern = [2, 2]
         dropView.layer?.addSublayer(borderLayer)
-        
+        self.dropBorderLayer = borderLayer
+
         let dropLabel = NSTextField(labelWithString: "Drag files or folders here")
         dropLabel.frame = NSRect(x: 0, y: 100, width: 500, height: 30)
-        dropLabel.textColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) // #ff7c06
         dropLabel.font = NSFont.systemFont(ofSize: 16)
         dropLabel.alignment = .center
         dropView.addSubview(dropLabel)
+        self.dropLabel = dropLabel
         
         let queueCountLabel = NSTextField(labelWithString: "items in queue: 0")
         queueCountLabel.frame = NSRect(x: 0, y: 10, width: 500, height: 20)
@@ -294,6 +314,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         gearButton.toolTip = "Settings"
         gearButton.target = self
         gearButton.action = #selector(showSettings)
+        self.gearButton = gearButton
 
         let lutCheckbox = NSButton(checkboxWithTitle: "Apply LUT", target: self, action: #selector(lutCheckboxChanged(_:)))
         lutCheckbox.frame = NSRect(x: 345, y: 320, width: 100, height: 20)
@@ -305,7 +326,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         lutSelectButton.target = self
         lutSelectButton.action = #selector(showLUTMenu(_:))
         self.lutSelectButton = lutSelectButton
-        populateLUTMenu()
         
         let lutLabel = NSTextField(labelWithString: "No LUT selected")
         lutLabel.frame = NSRect(x: 345, y: 285, width: 200, height: 16)
@@ -319,7 +339,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
             if FileManager.default.fileExists(atPath: lutPath) {
                 lutCheckbox.state = UserDefaults.standard.bool(forKey: "lutEnabled") ? .on : .off
                 lutLabel.stringValue = lutCheckbox.state == .on ? savedLUT : ""
-                lutLabel.textColor = NSColor(red: 8/255, green: 1.0, blue: 125/255, alpha: 1.0)
+                // Color will be set by updateWindowColors()
             }
         }
         
@@ -335,14 +355,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         contentView.addSubview(gearButton)
         self.contentView = contentView
         window.contentView = contentView
-        
+        window.delegate = self
+
         // Apply colors after all views are added
         updateFormatButtons()
         updateModeButtons()
         window.makeKeyAndOrderFront(nil)
         updateWindowColors()
-        
+
         self.window = window
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closingWindow = notification.object as? NSWindow else { return }
+
+        // Clear window references first
+        if closingWindow === window {
+            window?.delegate = nil
+            window = nil
+        } else if closingWindow === settingsWindow {
+            settingsWindow = nil
+        } else if closingWindow === lutManagementWindow {
+            lutManagementWindow = nil
+        }
     }
     
     func handleDrop(url: URL) {
@@ -378,35 +417,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         startNextJobIfNeeded()
     }
 
-    private func isDuplicateJob(_ url: URL) -> Bool {
-        if let activeJob = activeJob, activeJob.standardizedFileURL.path == url.standardizedFileURL.path {
-            return true
-        }
-        return jobQueue.contains { $0.standardizedFileURL.path == url.standardizedFileURL.path }
-    }
-
-    private func startNextJobIfNeeded() {
-        guard !isProcessing else { return }
-        guard !jobQueue.isEmpty else {
-            updateDropZoneAvailability()
-            return
-        }
-        isProcessing = true
-        activeJob = jobQueue.removeFirst()
-        updateDropZoneAvailability()
-        let outputFormat = currentOutputFormat()
-        if let jobURL = activeJob {
-            processFolder(jobURL, outputFormat: outputFormat) { [weak self] in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    self.isProcessing = false
-                    self.activeJob = nil
-                    self.updateDropZoneAvailability()
-                    self.startNextJobIfNeeded()
-                }
-            }
-        }
-    }
 
     private func updateDropZoneAvailability() {
         dropView?.isDropEnabled = true
@@ -423,8 +433,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         selectedMode = sender.tag
         self.currentMode = selectedMode == 1 ? .night : (selectedMode == 2 ? .auto : .day)
         UserDefaults.standard.set(selectedMode, forKey: "selectedModeSegment")
+
         updateModeButtons()
         updateWindowColors()
+        updateSettingsWindowColors()
+        updateLUTManagementWindowColors()
     }
     
     @objc func lutCheckboxChanged(_ sender: NSButton) {
@@ -436,7 +449,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         } else if let savedLUT = UserDefaults.standard.string(forKey: "lutFilePath"),
                   FileManager.default.fileExists(atPath: getLUTDirectoryURL().appendingPathComponent(savedLUT).path) {
             lutLabel?.stringValue = savedLUT
-            lutLabel?.textColor = NSColor(red: 8/255, green: 1.0, blue: 125/255, alpha: 1.0)
+            let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+            lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
         } else {
             lutLabel?.stringValue = "No LUT selected"
             lutLabel?.textColor = NSColor.secondaryLabelColor
@@ -467,10 +481,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
                 UserDefaults.standard.set(true, forKey: "lutEnabled")
                 self.lutCheckbox?.state = .on
                 self.lutLabel?.stringValue = url.lastPathComponent
-                self.lutLabel?.textColor = NSColor(red: 8/255, green: 1.0, blue: 125/255, alpha: 1.0)
-                
-                // Refresh the menu
-                self.populateLUTMenu()
+                let isDark = self.currentMode == .auto ? self.isSystemDarkAppearance() : (self.currentMode == .night)
+                self.lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+
+                // Refresh LUT management window if it's open
+                if self.lutManagementWindow != nil {
+                    self.closeLUTManagement()
+                    self.selectLUT()
+                }
             } catch {
                 self.appendLog(logURL: URL(fileURLWithPath: "/tmp/mxf2prxy.log"), entry: "Failed to copy LUT: \(error)\n")
             }
@@ -479,36 +497,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
     
     private func updateFormatButtons() {
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+        let selectedColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        let selectedTextColor = isDark ? NSColor.black : NSColor(white: 1.0, alpha: 0.8)
         for (index, btn) in formatButtons.enumerated() {
             if index == selectedFormat {
-                btn.bezelColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) // #ff7c06
-                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.black]
+                btn.bezelColor = selectedColor
+                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: selectedTextColor]
                 btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
             } else {
                 btn.bezelColor = isDark ? NSColor.darkGray : NSColor(calibratedWhite: 0.75, alpha: 1.0)
-                let textColor = isDark ? NSColor.lightGray : NSColor.darkGray
+                let textColor = isDark ? NSColor.lightGray : NSColor(white: 0.0, alpha: 0.8)
                 let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
                 btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
             }
         }
     }
-    
+
     private func updateModeButtons() {
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+        let selectedColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        let selectedTextColor = isDark ? NSColor.black : NSColor(white: 1.0, alpha: 0.8)
         for (index, btn) in modeButtons.enumerated() {
             if index == selectedMode {
-                btn.bezelColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) // #ff7c06
-                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.black]
+                btn.bezelColor = selectedColor
+                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: selectedTextColor]
                 btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
             } else {
                 btn.bezelColor = isDark ? NSColor.darkGray : NSColor(calibratedWhite: 0.75, alpha: 1.0)
-                let textColor = isDark ? NSColor.lightGray : NSColor.darkGray
+                let textColor = isDark ? NSColor.lightGray : NSColor(white: 0.0, alpha: 0.8)
                 let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
                 btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
             }
         }
     }
-    
+
     private func getLUTDirectoryURL() -> URL {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -522,18 +544,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
     }
     
     @objc func showLUTMenu(_ sender: NSButton) {
-        if let menu = sender.menu {
-            let point = NSPoint(x: 0, y: sender.bounds.height)
-            menu.popUp(positioning: nil, at: point, in: sender)
-        }
+        let menu = buildLUTMenu()
+        let point = NSPoint(x: 0, y: sender.bounds.height)
+        menu.popUp(positioning: nil, at: point, in: sender)
     }
     
-    private func populateLUTMenu() {
-        guard let button = lutSelectButton as? NSButton else { return }
-        
+    private func buildLUTMenu() -> NSMenu {
         let menu = NSMenu()
         let currentLUT = UserDefaults.standard.string(forKey: "lutFilePath")
-        
         // Add available LUTs
         let availableLUTs = getAvailableLUTs()
         for lut in availableLUTs {
@@ -544,18 +562,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
             }
             menu.addItem(item)
         }
-        
         // Add separator if we have LUTs
         if !availableLUTs.isEmpty {
             menu.addItem(NSMenuItem.separator())
         }
-        
         // Add "Add LUT..."
         let addItem = NSMenuItem(title: "Add LUT...", action: #selector(selectLUTFile), keyEquivalent: "")
         addItem.target = self
         menu.addItem(addItem)
-        
-        button.menu = menu
+        return menu
     }
     
     @objc func selectLUTFromMenu(_ sender: NSMenuItem) {
@@ -564,7 +579,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         UserDefaults.standard.set(true, forKey: "lutEnabled")
         lutCheckbox?.state = .on
         lutLabel?.stringValue = lutFilename
-        lutLabel?.textColor = NSColor(red: 8/255, green: 1.0, blue: 125/255, alpha: 1.0)
+        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+        lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        // No need to repopulate menu; it will be rebuilt next time
     }
     
     private func getAvailableLUTs() -> [String] {
@@ -583,7 +600,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
     private func updateWindowColors() {
         let mode = currentMode
         let isDark: Bool
-        
+
         if mode == .auto {
             isDark = isSystemDarkAppearance()
         } else if mode == .night {
@@ -592,42 +609,167 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
             isDark = false
         }
 
+        // Set window background color for title bar first
+        let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
+        window?.backgroundColor = titleBarColor
+
+        // Set appearance explicitly without animation to prevent crashes
         if #available(macOS 10.14, *) {
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = 0
             window?.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
-        } else {
-            window?.appearance = NSAppearance(named: .aqua)
+            NSAnimationContext.endGrouping()
         }
-        
+
         // Update background color
-        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.537, green: 0.537, blue: 0.537, alpha: 1.0) // #898989
+        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
         contentView?.layer?.backgroundColor = bgColor.cgColor
         contentView?.wantsLayer = true
-        
+
         // Update text color
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0) // #AAAAAA : #333333
         formatLabel?.textColor = textColor
-        queueCountLabel?.textColor = textColor
-        
+
+        // Update queue count label color - green in dark mode
+        let queueCountColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : textColor // #68dd6d in dark mode
+        queueCountLabel?.textColor = queueCountColor
+
         // Update button appearance
+        let accentColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
         if #available(macOS 10.14, *) {
-            button?.contentTintColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) // #ff7c06
+            button?.contentTintColor = accentColor
         }
-        
+
+        // Update button text color - use same color as Output label
+        if let btn = button {
+            let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
+        }
+
+        // Update gear icon color to match text color
+        if #available(macOS 10.14, *) {
+            gearButton?.contentTintColor = textColor
+        }
+
+        // Update drop zone label color to match text, border stays accent color
+        dropLabel?.textColor = textColor
+        dropBorderLayer?.strokeColor = accentColor.cgColor
+
+        // Update LUT checkbox text color
+        if let checkbox = lutCheckbox {
+            let checkboxAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            checkbox.attributedTitle = NSAttributedString(string: checkbox.title, attributes: checkboxAttrs)
+        }
+
+        // Update LUT select button text color
+        if let selectBtn = lutSelectButton {
+            let selectBtnAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            selectBtn.attributedTitle = NSAttributedString(string: selectBtn.title, attributes: selectBtnAttrs)
+        }
+
+        // Update LUT label color - green in dark mode when LUT is selected, otherwise secondary
+        if let label = lutLabel {
+            if label.stringValue.isEmpty || label.stringValue == "No LUT selected" {
+                label.textColor = NSColor.secondaryLabelColor
+            } else {
+                // LUT is selected - use green in dark mode, blue in light mode
+                label.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+            }
+        }
+
         updateDropViewColor()
+    }
+
+    private func updateSettingsWindowColors() {
+        guard let settingsWin = settingsWindow, let contentView = settingsWin.contentView else { return }
+
+        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+
+        // Update title bar color
+        let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
+        settingsWin.backgroundColor = titleBarColor
+
+        // Update appearance explicitly
+        if #available(macOS 10.14, *) {
+            settingsWin.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        }
+
+        // Update content background
+        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        contentView.layer?.backgroundColor = bgColor.cgColor
+
+        // Update all labels and buttons in the settings window
+        let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+        for subview in contentView.subviews {
+            if let label = subview as? NSTextField, !label.isEditable {
+                label.textColor = textColor
+            } else if let button = subview as? NSButton {
+                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+                button.attributedTitle = NSAttributedString(string: button.title, attributes: attrs)
+            }
+        }
+
+        // Update mode buttons to reflect selection
+        updateModeButtons()
+    }
+
+    private func updateLUTManagementWindowColors() {
+        guard let lutWin = lutManagementWindow, let contentView = lutWin.contentView else { return }
+
+        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+
+        // Update title bar color
+        let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
+        lutWin.backgroundColor = titleBarColor
+
+        // Update appearance explicitly
+        if #available(macOS 10.14, *) {
+            lutWin.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        }
+
+        // Update content background
+        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        contentView.layer?.backgroundColor = bgColor.cgColor
+
+        // Update title label and buttons
+        let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+        let listBgColor = isDark ? NSColor.black : NSColor(red: 0.65, green: 0.65, blue: 0.65, alpha: 1.0)
+
+        for subview in contentView.subviews {
+            if let label = subview as? NSTextField, !label.isEditable {
+                label.textColor = textColor
+            } else if let button = subview as? NSButton {
+                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+                button.attributedTitle = NSAttributedString(string: button.title, attributes: attrs)
+            } else if let scrollView = subview as? NSScrollView {
+                scrollView.backgroundColor = listBgColor
+                if let listView = scrollView.documentView {
+                    listView.layer?.backgroundColor = listBgColor.cgColor
+                    // Update all LUT row labels
+                    for rowView in listView.subviews {
+                        for item in rowView.subviews {
+                            if let label = item as? NSTextField {
+                                label.textColor = textColor
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     
     private func updateDropViewColor() {
         let color: NSColor
         let mode = currentMode
-        
+
         // If auto mode, check system appearance
         if mode == .auto {
             let isDark = isSystemDarkAppearance()
-            color = isDark ? NSColor.black : NSColor(red: 0.388, green: 0.388, blue: 0.388, alpha: 1.0)
+            color = isDark ? NSColor.black : NSColor(red: 0.65, green: 0.65, blue: 0.65, alpha: 1.0)
         } else if mode == .night {
             color = NSColor.black
         } else {
-            color = NSColor(red: 0.388, green: 0.388, blue: 0.388, alpha: 1.0) // #636363
+            color = NSColor(red: 0.65, green: 0.65, blue: 0.65, alpha: 1.0) // Lighter gray
         }
         dropView?.layer?.backgroundColor = color.cgColor
     }
@@ -728,7 +870,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         let outputFileURL = proxyFolderURL.appendingPathComponent(outputFileName)
 
         // Find watermark in Resources
-        let watermarkURL = Bundle.main.resourceURL?.appendingPathComponent("mxf2proxy.png")
+        let watermarkURL = Bundle.main.resourceURL?.appendingPathComponent("watermark.png")
         let hasWatermark = watermarkURL != nil && FileManager.default.fileExists(atPath: watermarkURL?.path ?? "")
 
         let ffmpegURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("ffmpeg")
@@ -753,22 +895,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
             "-maxrate", "45M",
             "-bufsize", "90M"
         ]
-
-        // Watermark args only for MXF files (MOV uses two-pass method)
-        let isMOVFile = mxfFile.pathExtension.lowercased() == "mov"
-        let watermarkArgs: [String]
-        let videoMap: [String]
-
-        if hasWatermark && !isMOVFile {
-            watermarkArgs = [
-                "-i", watermarkURL!.path,
-                "-filter_complex", "[0:v]scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
-            ]
-            videoMap = ["-map", "[v]"]
-        } else {
-            watermarkArgs = []
-            videoMap = ["-map", "0:v"]
-        }
 
         switch outputFormat {
         case .quickTime:
@@ -815,12 +941,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
                                 "-i", watermarkURL!.path,
                                 "-i", mxfFile.path,
                                 "-filter_complex", filterChain,
+                                "-map", "2:d?",
+                                "-c:d", "copy",
                                 "-map", "[v]",
                                 "-map", "2:a?",
                                 "-c:v", "libx264",
                                 "-preset", "fast",
                                 "-crf", "18",
                                 "-c:a", "copy",
+                                "-map_metadata:s:a", "2:s:a",
+                                "-disposition:a", "copy",
                                 "-sn",
                                 outputFileURL.path
                             ]
@@ -831,12 +961,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
                                     "-i", intermediateURL.path,
                                     "-i", mxfFile.path,
                                     "-vf", "lut3d=file='\(lutPath!)'",
+                                    "-map", "1:d?",
+                                    "-c:d", "copy",
                                     "-map", "0:v",
                                     "-map", "1:a?",
                                     "-c:v", "libx264",
                                     "-preset", "fast",
                                     "-crf", "18",
                                     "-c:a", "copy",
+                                    "-map_metadata:s:a", "1:s:a",
+                                    "-disposition:a", "copy",
                                     "-sn",
                                     outputFileURL.path
                                 ]
@@ -844,12 +978,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
                                 args = [
                                     "-i", intermediateURL.path,
                                     "-i", mxfFile.path,
+                                    "-map", "1:d?",
+                                    "-c:d", "copy",
                                     "-map", "0:v",
                                     "-map", "1:a?",
                                     "-c:v", "libx264",
                                     "-preset", "fast",
                                     "-crf", "18",
                                     "-c:a", "copy",
+                                    "-map_metadata:s:a", "1:s:a",
+                                    "-disposition:a", "copy",
                                     "-sn",
                                     outputFileURL.path
                                 ]
@@ -872,17 +1010,55 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
                     }
                 }
             } else {
-                // Original single-pass for MXF files
+                // Single-pass for MXF files
+                // Check for LUT
+                let lutEnabled = UserDefaults.standard.bool(forKey: "lutEnabled")
+                let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
+                let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
+                let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
+                self.appendLog(logURL: logURL, entry: "MXF->QT: LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
+
                 var args = ["-i", mxfFile.path]
-                args += watermarkArgs
-                args += videoMap
+                var videoFilterArgs: [String]
+                var videoMapArgs: [String]
+
+                if hasWatermark {
+                    // Add watermark input
+                    args += ["-i", watermarkURL!.path]
+
+                    // Build filter chain with optional LUT
+                    var filterChain = "[0:v]"
+                    if hasLUT {
+                        filterChain += "lut3d=file='\(lutPath!)',"
+                    }
+                    filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+
+                    videoFilterArgs = ["-filter_complex", filterChain]
+                    videoMapArgs = ["-map", "[v]"]
+                } else if hasLUT {
+                    // LUT only, no watermark
+                    videoFilterArgs = ["-vf", "lut3d=file='\(lutPath!)'"]
+                    videoMapArgs = ["-map", "0:v"]
+                } else {
+                    // No watermark, no LUT
+                    videoFilterArgs = []
+                    videoMapArgs = ["-map", "0:v"]
+                }
+
+                args += videoFilterArgs
+                // Map data/timecode track FIRST to get track ID 1, pushing video to ID 2 and audio to IDs 3-6
+                args += ["-map", "0:d?", "-c:d", "copy"]
+                args += videoMapArgs
                 args += quickTimeCodecArgs
                 args += [
                     "-map", "0:a?",
                     "-c:a", "copy",
+                    "-map_metadata", "0",
+                    "-disposition:a", "copy",
                     "-sn",
                     outputFileURL.path
                 ]
+
                 runProcessDetached(executableURL: ffmpegURL, arguments: args, logURL: logURL) { [weak self] status in
                     DispatchQueue.main.async { [weak self] in
                         guard let self = self else { return }
@@ -896,17 +1072,51 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
                 }
             }
         case .mxf:
-            // Two-step process for MXF:
-            // 1. Create intermediate video with watermark
+            // Two-step process for MXF output
+            // Check for LUT
+            let lutEnabled = UserDefaults.standard.bool(forKey: "lutEnabled")
+            let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
+            let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
+            let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
+            self.appendLog(logURL: logURL, entry: "MXF output: LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
+
+            // Step 1: Create intermediate video with LUT and/or watermark
             let tempVideoURL = proxyFolderURL.appendingPathComponent(".\(mxfFile.deletingPathExtension().lastPathComponent)_temp.mov")
             var args1 = ["-i", mxfFile.path]
-            args1 += watermarkArgs
-            args1 += videoMap
+            var videoFilterArgs: [String]
+            var videoMapArgs: [String]
+
+            if hasWatermark {
+                // Add watermark input
+                args1 += ["-i", watermarkURL!.path]
+
+                // Build filter chain with optional LUT
+                var filterChain = "[0:v]"
+                if hasLUT {
+                    filterChain += "lut3d=file='\(lutPath!)',"
+                }
+                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+
+                videoFilterArgs = ["-filter_complex", filterChain]
+                videoMapArgs = ["-map", "[v]"]
+            } else if hasLUT {
+                // LUT only, no watermark
+                videoFilterArgs = ["-vf", "lut3d=file='\(lutPath!)'"]
+                videoMapArgs = ["-map", "0:v"]
+            } else {
+                // No watermark, no LUT
+                videoFilterArgs = []
+                videoMapArgs = ["-map", "0:v"]
+            }
+
+            args1 += videoFilterArgs
+            args1 += videoMapArgs
             args1 += mxfCodecArgs
             args1 += [
                 "-an",
                 tempVideoURL.path
             ]
+
             runProcessDetached(executableURL: ffmpegURL, arguments: args1, logURL: logURL) { [weak self] status1 in
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
@@ -918,7 +1128,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
                         return
                     }
 
-                    // Step 2: Replace video in original MXF with watermarked video
+                    // Step 2: Replace video in original MXF with processed video
                     let args2 = [
                         "-i", mxfFile.path,
                         "-i", tempVideoURL.path,
@@ -995,6 +1205,340 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
             try? entry.write(to: logURL, atomically: true, encoding: .utf8)
         }
     }
+
+    // Check whether a URL is already queued or active
+    private func isDuplicateJob(_ url: URL) -> Bool {
+        if let active = activeJob, active == url { return true }
+        return jobQueue.contains(where: { $0 == url })
+    }
+
+    // Start the next job if we're not already processing
+    private func startNextJobIfNeeded() {
+        guard !isProcessing, !jobQueue.isEmpty else { return }
+        let next = jobQueue.removeFirst()
+        activeJob = next
+        isProcessing = true
+        let fmt = currentOutputFormat()
+        processFolder(next, outputFormat: fmt) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isProcessing = false
+                self.activeJob = nil
+                // Continue with remaining jobs
+                self.startNextJobIfNeeded()
+            }
+        }
+    }
+
+    // Open LUT management window
+    @objc func selectLUT() {
+        if lutManagementWindow == nil {
+            guard let mainWindow = window else { return }
+            let windowSize = NSSize(width: 500, height: 400)
+            let mainOrigin = mainWindow.frame.origin
+            let windowOrigin = NSPoint(x: mainOrigin.x + 50, y: mainOrigin.y + 50)
+
+            let lutWin = NSWindow(
+                contentRect: NSRect(origin: windowOrigin, size: windowSize),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            lutWin.title = "Manage LUTs"
+            lutWin.titlebarAppearsTransparent = true
+            lutWin.isRestorable = false
+
+            // Match background color to main window using current mode
+            let isDark: Bool
+            if currentMode == .auto {
+                isDark = isSystemDarkAppearance()
+            } else if currentMode == .night {
+                isDark = true
+            } else {
+                isDark = false
+            }
+
+            // Set window background color for title bar first
+            let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
+            lutWin.backgroundColor = titleBarColor
+
+            // Set appearance explicitly
+            if #available(macOS 10.14, *) {
+                lutWin.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+            }
+
+            let contentView = NSView()
+            contentView.wantsLayer = true
+
+            if isDark {
+                contentView.layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0).cgColor
+            } else {
+                contentView.layer?.backgroundColor = NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0).cgColor
+            }
+
+            // Title label
+            let titleLabel = NSTextField(labelWithString: "LUT Library")
+            titleLabel.frame = NSRect(x: 20, y: 360, width: 200, height: 24)
+            titleLabel.font = NSFont.boldSystemFont(ofSize: 16)
+            titleLabel.textColor = formatLabel?.textColor ?? NSColor.labelColor
+            contentView.addSubview(titleLabel)
+
+            // Scroll view for LUT list
+            let scrollView = NSScrollView(frame: NSRect(x: 20, y: 80, width: 460, height: 260))
+            scrollView.hasVerticalScroller = true
+            scrollView.autohidesScrollers = true
+            scrollView.borderType = .lineBorder
+
+            // Set scroll view background to match list
+            let listBgColor = isDark ? NSColor.black : NSColor(red: 0.65, green: 0.65, blue: 0.65, alpha: 1.0)
+            scrollView.backgroundColor = listBgColor
+
+            let listView = FlippedView(frame: NSRect(x: 0, y: 0, width: 440, height: 260))
+            listView.wantsLayer = true
+            listView.layer?.backgroundColor = listBgColor.cgColor
+
+            // Populate LUT list
+            let luts = getAvailableLUTs()
+            var yPos: CGFloat = 0  // Start from top with flipped coordinates
+
+            for (index, lutName) in luts.enumerated() {
+                let rowView = NSView(frame: NSRect(x: 0, y: yPos, width: 440, height: 30))
+
+                // LUT name label - with flipped coordinates, y=5 is 5 pixels from TOP
+                let nameLabel = NSTextField(labelWithString: lutName)
+                nameLabel.frame = NSRect(x: 10, y: 5, width: 300, height: 20)
+                let lutTextColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+                nameLabel.textColor = lutTextColor
+                nameLabel.font = NSFont.systemFont(ofSize: 12)
+                nameLabel.alignment = .left
+                nameLabel.lineBreakMode = .byTruncatingTail
+                nameLabel.cell?.usesSingleLineMode = true
+                nameLabel.cell?.truncatesLastVisibleLine = true
+                // Try to control vertical alignment
+                if let cell = nameLabel.cell {
+                    cell.controlSize = .regular
+                }
+                rowView.addSubview(nameLabel)
+
+                // Rename button (pencil icon)
+                let renameButton = NSButton(frame: NSRect(x: 360, y: 2, width: 30, height: 24))
+                if #available(macOS 11.0, *) {
+                    if let pencilImage = NSImage(systemSymbolName: "pencil", accessibilityDescription: "Rename") {
+                        renameButton.image = pencilImage
+                        renameButton.imageScaling = .scaleProportionallyDown
+                    } else {
+                        renameButton.title = "✏️"
+                    }
+                } else {
+                    renameButton.title = "✏️"
+                }
+                renameButton.bezelStyle = .regularSquare
+                renameButton.isBordered = true
+                renameButton.tag = index
+                renameButton.target = self
+                renameButton.action = #selector(renameLUT(_:))
+                renameButton.identifier = NSUserInterfaceItemIdentifier(lutName)
+                renameButton.toolTip = "Rename LUT"
+                rowView.addSubview(renameButton)
+
+                // Delete button (trash icon)
+                let deleteButton = NSButton(frame: NSRect(x: 395, y: 2, width: 30, height: 24))
+                if #available(macOS 11.0, *) {
+                    if let trashImage = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete") {
+                        deleteButton.image = trashImage
+                        deleteButton.imageScaling = .scaleProportionallyDown
+                    } else {
+                        deleteButton.title = "🗑"
+                    }
+                } else {
+                    deleteButton.title = "🗑"
+                }
+                deleteButton.bezelStyle = .regularSquare
+                deleteButton.isBordered = true
+                deleteButton.tag = index
+                deleteButton.target = self
+                deleteButton.action = #selector(deleteLUT(_:))
+                deleteButton.identifier = NSUserInterfaceItemIdentifier(lutName)
+                deleteButton.toolTip = "Delete LUT"
+                rowView.addSubview(deleteButton)
+
+                listView.addSubview(rowView)
+                yPos += 30  // Increment for flipped coordinates (top to bottom)
+            }
+
+            // Adjust list view height
+            if luts.count * 30 > 260 {
+                listView.frame = NSRect(x: 0, y: 0, width: 440, height: CGFloat(luts.count * 30))
+            }
+
+            scrollView.documentView = listView
+            contentView.addSubview(scrollView)
+
+            // Button text color based on mode - match the Output label color
+            let buttonTextColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(white: 0.2, alpha: 1.0)
+
+            // Add LUT button
+            let addButton = NSButton(frame: NSRect(x: 20, y: 40, width: 120, height: 28))
+            addButton.title = "Add LUT..."
+            addButton.bezelStyle = .rounded
+            addButton.target = self
+            addButton.action = #selector(selectLUTFile)
+            if #available(macOS 10.14, *) {
+                addButton.contentTintColor = buttonTextColor
+            }
+            let addAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: buttonTextColor]
+            addButton.attributedTitle = NSAttributedString(string: addButton.title, attributes: addAttrs)
+            contentView.addSubview(addButton)
+
+            // Open Folder button
+            let openFolderButton = NSButton(frame: NSRect(x: 150, y: 40, width: 140, height: 28))
+            openFolderButton.title = "Open in Finder"
+            openFolderButton.bezelStyle = .rounded
+            openFolderButton.target = self
+            openFolderButton.action = #selector(openLUTFolder)
+            if #available(macOS 10.14, *) {
+                openFolderButton.contentTintColor = buttonTextColor
+            }
+            let openAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: buttonTextColor]
+            openFolderButton.attributedTitle = NSAttributedString(string: openFolderButton.title, attributes: openAttrs)
+            contentView.addSubview(openFolderButton)
+
+            // Close button
+            let closeButton = NSButton(frame: NSRect(x: 360, y: 40, width: 120, height: 28))
+            closeButton.title = "Close"
+            closeButton.bezelStyle = .rounded
+            closeButton.target = self
+            closeButton.action = #selector(closeLUTManagement)
+            if #available(macOS 10.14, *) {
+                closeButton.contentTintColor = buttonTextColor
+            }
+            let closeAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: buttonTextColor]
+            closeButton.attributedTitle = NSAttributedString(string: closeButton.title, attributes: closeAttrs)
+            contentView.addSubview(closeButton)
+
+            lutWin.contentView = contentView
+            lutWin.delegate = self
+            self.lutManagementWindow = lutWin
+        }
+
+        lutManagementWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func deleteLUT(_ sender: NSButton) {
+        guard let lutName = sender.identifier?.rawValue else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Delete LUT"
+        alert.informativeText = "Are you sure you want to delete '\(lutName)'?"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+
+        alert.beginSheetModal(for: lutManagementWindow!) { response in
+            if response == .alertFirstButtonReturn {
+                let lutDir = self.getLUTDirectoryURL()
+                let lutURL = lutDir.appendingPathComponent(lutName)
+
+                do {
+                    try FileManager.default.removeItem(at: lutURL)
+
+                    // If this was the selected LUT, clear the selection
+                    if UserDefaults.standard.string(forKey: "lutFilePath") == lutName {
+                        UserDefaults.standard.removeObject(forKey: "lutFilePath")
+                        UserDefaults.standard.set(false, forKey: "lutEnabled")
+                        self.lutCheckbox?.state = .off
+                        self.lutLabel?.stringValue = ""
+                    }
+
+                    // Refresh the window
+                    self.closeLUTManagement()
+                    self.selectLUT()
+                } catch {
+                    let errorAlert = NSAlert()
+                    errorAlert.messageText = "Error"
+                    errorAlert.informativeText = "Failed to delete LUT: \(error.localizedDescription)"
+                    errorAlert.alertStyle = .critical
+                    errorAlert.runModal()
+                }
+            }
+        }
+    }
+
+    @objc private func renameLUT(_ sender: NSButton) {
+        guard let oldLutName = sender.identifier?.rawValue else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Rename LUT"
+        alert.informativeText = "Enter a new name for '\(oldLutName)':"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+
+        // Add text field for new name
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        textField.stringValue = oldLutName.replacingOccurrences(of: ".cube", with: "")
+        alert.accessoryView = textField
+        alert.window.initialFirstResponder = textField
+
+        alert.beginSheetModal(for: lutManagementWindow!) { response in
+            if response == .alertFirstButtonReturn {
+                var newLutName = textField.stringValue.trimmingCharacters(in: .whitespaces)
+
+                // Ensure .cube extension
+                if !newLutName.hasSuffix(".cube") {
+                    newLutName += ".cube"
+                }
+
+                // Validate new name
+                guard !newLutName.isEmpty && newLutName != oldLutName else { return }
+
+                let lutDir = self.getLUTDirectoryURL()
+                let oldURL = lutDir.appendingPathComponent(oldLutName)
+                let newURL = lutDir.appendingPathComponent(newLutName)
+
+                // Check if new name already exists
+                if FileManager.default.fileExists(atPath: newURL.path) {
+                    let errorAlert = NSAlert()
+                    errorAlert.messageText = "Error"
+                    errorAlert.informativeText = "A LUT with the name '\(newLutName)' already exists."
+                    errorAlert.alertStyle = .critical
+                    errorAlert.runModal()
+                    return
+                }
+
+                do {
+                    try FileManager.default.moveItem(at: oldURL, to: newURL)
+
+                    // If this was the selected LUT, update the selection
+                    if UserDefaults.standard.string(forKey: "lutFilePath") == oldLutName {
+                        UserDefaults.standard.set(newLutName, forKey: "lutFilePath")
+                        self.lutLabel?.stringValue = newLutName
+                    }
+
+                    // Refresh the window
+                    self.closeLUTManagement()
+                    self.selectLUT()
+                } catch {
+                    let errorAlert = NSAlert()
+                    errorAlert.messageText = "Error"
+                    errorAlert.informativeText = "Failed to rename LUT: \(error.localizedDescription)"
+                    errorAlert.alertStyle = .critical
+                    errorAlert.runModal()
+                }
+            }
+        }
+    }
+
+    @objc private func openLUTFolder() {
+        let lutDir = getLUTDirectoryURL()
+        NSWorkspace.shared.activateFileViewerSelecting([lutDir])
+    }
+
+    @objc private func closeLUTManagement() {
+        lutManagementWindow?.orderOut(nil)
+        lutManagementWindow = nil
+    }
     
     func setupMenuBar() {
         let mainMenu = NSMenu()
@@ -1037,9 +1581,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
                 defer: false
             )
             settingsWin.title = "Settings"
-            settingsWin.appearance = NSAppearance(named: .vibrantDark)
+            settingsWin.titlebarAppearsTransparent = true
+            settingsWin.isRestorable = false
 
+            // Match background color to main window using current mode
+            let isDark: Bool
+            if currentMode == .auto {
+                isDark = isSystemDarkAppearance()
+            } else if currentMode == .night {
+                isDark = true
+            } else {
+                isDark = false
+            }
 
+            // Set window background color for title bar first
+            let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
+            settingsWin.backgroundColor = titleBarColor
+
+            // Set appearance explicitly
+            if #available(macOS 10.14, *) {
+                settingsWin.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+            }
+
+            let mainLabelColor = formatLabel?.textColor ?? NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
 
             let lutButton = NSButton(frame: NSRect(x: 100, y: 185, width: 200, height: 28))
             lutButton.title = "Manage LUTs"
@@ -1047,7 +1611,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
             lutButton.target = self
             lutButton.action = #selector(selectLUT)
             // Set button text color to match main window's Output label color
-            let mainLabelColor = formatLabel?.textColor ?? NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
             let lutButtonAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: mainLabelColor]
             lutButton.attributedTitle = NSAttributedString(string: lutButton.title, attributes: lutButtonAttrs)
 
@@ -1077,16 +1640,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
 
             let contentView = NSView()
             contentView.wantsLayer = true
-            // Match background color to main window in dark mode
-            var isDark = false
-            if #available(macOS 10.14, *) {
-                isDark = (window?.appearance?.name == .darkAqua) || (window?.appearance?.name == .vibrantDark)
-            } else {
-                isDark = (window?.appearance?.name == .vibrantDark)
-            }
+
             if isDark {
                 contentView.layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0).cgColor
+            } else {
+                contentView.layer?.backgroundColor = NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0).cgColor
             }
+
             contentView.addSubview(lutButton)
             contentView.addSubview(modeLabel)
             for btn in modeButtons {
@@ -1104,6 +1664,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
             contentView.addSubview(closeButton)
 
             settingsWin.contentView = contentView
+            settingsWin.delegate = self
             self.settingsWindow = settingsWin
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
@@ -1115,29 +1676,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropViewDelegate {
         settingsWindow = nil
     }
     
-    @objc private func selectLUT() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.allowedFileTypes = ["cube"]
-        panel.message = "Select LUT file (.cube format)"
-        
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                UserDefaults.standard.set(url.path, forKey: "lutFilePath")
-                // Update button title in settings window if it exists
-                if let settingsContentView = self.settingsWindow?.contentView {
-                    for subview in settingsContentView.subviews {
-                        if let button = subview as? NSButton, button.action == #selector(self.selectLUT) {
-                            button.title = url.lastPathComponent
-                            break
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Removed LUT menu logic from settings page for clarity and to avoid conflicts.
     
     private func currentOutputFormat() -> OutputFormat {
         return selectedFormat == 1 ? .mxf : .quickTime
