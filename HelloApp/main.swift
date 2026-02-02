@@ -166,6 +166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var formatLabel: NSTextField?
     private var button: NSButton?
     private var queueCountLabel: NSTextField?
+    private var watermarkCheckbox: NSButton?
     private var lutCheckbox: NSButton?
     private var lutSelectButton: NSButton?
     private var lutLabel: NSTextField?
@@ -316,11 +317,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         gearButton.action = #selector(showSettings)
         self.gearButton = gearButton
 
+        // Watermark checkbox
+        let watermarkCheckbox = NSButton(checkboxWithTitle: "Apply watermark", target: self, action: #selector(watermarkCheckboxChanged(_:)))
+        watermarkCheckbox.frame = NSRect(x: 345, y: 336, width: 140, height: 20)
+        // Default to true on first launch
+        if UserDefaults.standard.object(forKey: "watermarkEnabled") == nil {
+            UserDefaults.standard.set(true, forKey: "watermarkEnabled")
+        }
+        watermarkCheckbox.state = UserDefaults.standard.bool(forKey: "watermarkEnabled") ? .on : .off
+        self.watermarkCheckbox = watermarkCheckbox
+
         let lutCheckbox = NSButton(checkboxWithTitle: "Apply LUT", target: self, action: #selector(lutCheckboxChanged(_:)))
-        lutCheckbox.frame = NSRect(x: 345, y: 320, width: 100, height: 20)
+        lutCheckbox.frame = NSRect(x: 345, y: 306, width: 100, height: 20)
         self.lutCheckbox = lutCheckbox
-        
-        let lutSelectButton = NSButton(frame: NSRect(x: 450, y: 317, width: 110, height: 28))
+
+        let lutSelectButton = NSButton(frame: NSRect(x: 450, y: 303, width: 110, height: 28))
         lutSelectButton.title = "Select LUT"
         lutSelectButton.bezelStyle = .rounded
         lutSelectButton.target = self
@@ -328,7 +339,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         self.lutSelectButton = lutSelectButton
         
         let lutLabel = NSTextField(labelWithString: "No LUT selected")
-        lutLabel.frame = NSRect(x: 345, y: 285, width: 200, height: 16)
+        lutLabel.frame = NSRect(x: 345, y: 271, width: 200, height: 16)
         lutLabel.font = NSFont.systemFont(ofSize: 11)
         lutLabel.textColor = NSColor.secondaryLabelColor
         self.lutLabel = lutLabel
@@ -347,6 +358,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         for btn in formatButtons {
             contentView.addSubview(btn)
         }
+        contentView.addSubview(watermarkCheckbox)
         contentView.addSubview(lutCheckbox)
         contentView.addSubview(lutSelectButton)
         contentView.addSubview(lutLabel)
@@ -440,6 +452,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         updateLUTManagementWindowColors()
     }
     
+    @objc func watermarkCheckboxChanged(_ sender: NSButton) {
+        let isEnabled = (sender.state == .on)
+        UserDefaults.standard.set(isEnabled, forKey: "watermarkEnabled")
+    }
+
     @objc func lutCheckboxChanged(_ sender: NSButton) {
         let isEnabled = (sender.state == .on)
         UserDefaults.standard.set(isEnabled, forKey: "lutEnabled")
@@ -654,6 +671,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Update drop zone label color to match text, border stays accent color
         dropLabel?.textColor = textColor
         dropBorderLayer?.strokeColor = accentColor.cgColor
+
+        // Update watermark checkbox text color
+        if let checkbox = watermarkCheckbox {
+            let checkboxAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            checkbox.attributedTitle = NSAttributedString(string: checkbox.title, attributes: checkboxAttrs)
+        }
 
         // Update LUT checkbox text color
         if let checkbox = lutCheckbox {
@@ -871,7 +894,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Find watermark in Resources
         let watermarkURL = Bundle.main.resourceURL?.appendingPathComponent("watermark.png")
-        let hasWatermark = watermarkURL != nil && FileManager.default.fileExists(atPath: watermarkURL?.path ?? "")
+        let watermarkEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
+        let hasWatermark = watermarkEnabled && watermarkURL != nil && FileManager.default.fileExists(atPath: watermarkURL?.path ?? "")
 
         let ffmpegURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("ffmpeg")
         let debugPath = ffmpegURL?.path ?? "nil"
