@@ -161,6 +161,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     weak var lutManagementWindow: NSWindow?
     private var formatButtons: [NSButton] = []
     private var modeButtons: [NSButton] = []
+    private let sessionUUID = UUID().uuidString
     private var dropView: DropView?
     private var contentView: NSView?
     private var formatLabel: NSTextField?
@@ -179,7 +180,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var activeJob: URL?
     private var isProcessing: Bool = false
     private var totalClipsQueued: Int = 0
-    
+    private var overwriteAllFiles: Bool = false
+    private var skipAllExisting: Bool = false
+
     private enum OutputFormat {
         case quickTime
         case mxf
@@ -382,17 +385,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         return true
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // Prevent actual window close for secondary windows to avoid animation crashes
+        // Instead, just hide them like the Close button does
+        if sender === settingsWindow {
+            settingsWindow?.orderOut(nil)
+            settingsWindow = nil
+            return false  // Prevent the actual close
+        } else if sender === lutManagementWindow {
+            lutManagementWindow?.orderOut(nil)
+            lutManagementWindow = nil
+            return false  // Prevent the actual close
+        }
+
+        // Allow main window to close normally (quits the app)
+        return true
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow else { return }
 
-        // Clear window references first
+        // Clear window references for main window
         if closingWindow === window {
             window?.delegate = nil
             window = nil
-        } else if closingWindow === settingsWindow {
-            settingsWindow = nil
-        } else if closingWindow === lutManagementWindow {
-            lutManagementWindow = nil
         }
     }
     
@@ -630,18 +646,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
         window?.backgroundColor = titleBarColor
 
-        // Set appearance explicitly without animation to prevent crashes
-        if #available(macOS 10.14, *) {
-            NSAnimationContext.beginGrouping()
-            NSAnimationContext.current.duration = 0
-            window?.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
-            NSAnimationContext.endGrouping()
+        // Set appearance explicitly without animations to prevent crashes
+        if let win = window {
+            let savedBehavior = win.animationBehavior
+            win.animationBehavior = .none
+            if #available(macOS 10.14, *) {
+                win.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+            }
+            win.animationBehavior = savedBehavior
         }
 
-        // Update background color
+        // Update background color without implicit animations
         let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         contentView?.layer?.backgroundColor = bgColor.cgColor
         contentView?.wantsLayer = true
+        CATransaction.commit()
 
         // Update text color
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0) // #AAAAAA : #333333
@@ -704,7 +725,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
 
     private func updateSettingsWindowColors() {
-        guard let settingsWin = settingsWindow, let contentView = settingsWin.contentView else { return }
+        guard let settingsWin = settingsWindow, settingsWin.isVisible, let contentView = settingsWin.contentView else { return }
 
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
 
@@ -712,14 +733,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
         settingsWin.backgroundColor = titleBarColor
 
-        // Update appearance explicitly
+        // Update appearance explicitly without animations
+        let savedBehavior = settingsWin.animationBehavior
+        settingsWin.animationBehavior = .none
         if #available(macOS 10.14, *) {
             settingsWin.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
         }
+        settingsWin.animationBehavior = savedBehavior
 
-        // Update content background
+        // Update content background without implicit animations
         let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         contentView.layer?.backgroundColor = bgColor.cgColor
+        CATransaction.commit()
 
         // Update all labels and buttons in the settings window
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
@@ -737,7 +764,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
 
     private func updateLUTManagementWindowColors() {
-        guard let lutWin = lutManagementWindow, let contentView = lutWin.contentView else { return }
+        guard let lutWin = lutManagementWindow, lutWin.isVisible, let contentView = lutWin.contentView else { return }
 
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
 
@@ -745,14 +772,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
         lutWin.backgroundColor = titleBarColor
 
-        // Update appearance explicitly
+        // Update appearance explicitly without animations
+        let savedBehavior = lutWin.animationBehavior
+        lutWin.animationBehavior = .none
         if #available(macOS 10.14, *) {
             lutWin.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
         }
+        lutWin.animationBehavior = savedBehavior
 
-        // Update content background
+        // Update content background without implicit animations
         let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         contentView.layer?.backgroundColor = bgColor.cgColor
+        CATransaction.commit()
 
         // Update title label and buttons
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
@@ -767,7 +800,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             } else if let scrollView = subview as? NSScrollView {
                 scrollView.backgroundColor = listBgColor
                 if let listView = scrollView.documentView {
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
                     listView.layer?.backgroundColor = listBgColor.cgColor
+                    CATransaction.commit()
                     // Update all LUT row labels
                     for rowView in listView.subviews {
                         for item in rowView.subviews {
@@ -823,9 +859,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
     
     private func processFolder(_ url: URL, outputFormat: OutputFormat, completion: @escaping @Sendable () -> Void) {
+        // Reset overwrite/skip flags for new batch
+        self.overwriteAllFiles = false
+        self.skipAllExisting = false
+
         // Save current selections to UserDefaults
         UserDefaults.standard.set(self.selectedFormat, forKey: "selectedFormatSegment")
-        
+
         // Move file I/O to background queue to keep main thread responsive
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -875,7 +915,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
     }
 
-    private func processNextFile(index: Int, mxfFiles: [URL], proxyFolderURL: URL, outputFormat: OutputFormat, completion: @escaping @Sendable () -> Void) {
+    private func processNextFile(index: Int, mxfFiles: [URL], proxyFolderURL: URL, outputFormat: OutputFormat, forceOverwrite: Bool = false, completion: @escaping @Sendable () -> Void) {
         guard index < mxfFiles.count else {
             print("Conversion complete: \(proxyFolderURL.path)")
             completion()
@@ -892,6 +932,58 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
         let outputFileURL = proxyFolderURL.appendingPathComponent(outputFileName)
 
+        // Initialize log file
+        let logURL = proxyFolderURL.appendingPathComponent("conversion_log.txt")
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        }
+
+        // Check if output file already exists (unless forceOverwrite is true)
+        if !forceOverwrite && FileManager.default.fileExists(atPath: outputFileURL.path) {
+            // If user already chose "Skip All", skip this file
+            if self.skipAllExisting {
+                self.appendLog(logURL: logURL, entry: "SKIPPED (already exists): \(mxfFile.lastPathComponent)\n\n")
+                self.totalClipsQueued -= 1
+                self.updateDropZoneAvailability()
+                self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
+                return
+            }
+
+            // If user hasn't chosen "Overwrite All", ask what to do
+            if !self.overwriteAllFiles {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.showDuplicateFileAlert(fileName: outputFileName) { action in
+                        switch action {
+                        case .overwrite:
+                            self.continueProcessing(index: index, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, outputFileURL: outputFileURL, shouldOverwrite: true, completion: completion)
+                        case .skip:
+                            self.appendLog(logURL: logURL, entry: "SKIPPED (already exists): \(mxfFile.lastPathComponent)\n\n")
+                            self.totalClipsQueued -= 1
+                            self.updateDropZoneAvailability()
+                            self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
+                        case .overwriteAll:
+                            self.overwriteAllFiles = true
+                            self.continueProcessing(index: index, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, outputFileURL: outputFileURL, shouldOverwrite: true, completion: completion)
+                        case .skipAll:
+                            self.skipAllExisting = true
+                            self.appendLog(logURL: logURL, entry: "SKIPPED (already exists): \(mxfFile.lastPathComponent)\n\n")
+                            self.totalClipsQueued -= 1
+                            self.updateDropZoneAvailability()
+                            self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
+                        case .cancel:
+                            // Cancel the entire batch
+                            self.appendLog(logURL: logURL, entry: "CANCELLED by user\n\n")
+                            self.totalClipsQueued = 0
+                            self.updateDropZoneAvailability()
+                            completion()
+                        }
+                    }
+                }
+                return
+            }
+        }
+
         // Find watermark in Resources
         let watermarkURL = Bundle.main.resourceURL?.appendingPathComponent("watermark.png")
         let watermarkEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
@@ -900,10 +992,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let ffmpegURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("ffmpeg")
         let debugPath = ffmpegURL?.path ?? "nil"
         let debugLog = "Using ffmpeg at: \(debugPath)\n"
-        let logURL = proxyFolderURL.appendingPathComponent("conversion_log.txt")
-        if !FileManager.default.fileExists(atPath: logURL.path) {
-            FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        }
         appendLog(logURL: logURL, entry: debugLog)
 
         let quickTimeCodecArgs = [
@@ -1042,7 +1130,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
                 self.appendLog(logURL: logURL, entry: "MXF->QT: LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
 
-                var args = ["-i", mxfFile.path]
+                var args = (forceOverwrite || self.overwriteAllFiles) ? ["-y", "-i", mxfFile.path] : ["-i", mxfFile.path]
                 var videoFilterArgs: [String]
                 var videoMapArgs: [String]
 
@@ -1106,7 +1194,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
             // Step 1: Create intermediate video with LUT and/or watermark
             let tempVideoURL = proxyFolderURL.appendingPathComponent(".\(mxfFile.deletingPathExtension().lastPathComponent)_temp.mov")
-            var args1 = ["-i", mxfFile.path]
+            var args1 = (forceOverwrite || self.overwriteAllFiles) ? ["-y", "-i", mxfFile.path] : ["-i", mxfFile.path]
             var videoFilterArgs: [String]
             var videoMapArgs: [String]
 
@@ -1153,7 +1241,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     }
 
                     // Step 2: Replace video in original MXF with processed video
-                    let args2 = [
+                    var args2 = (forceOverwrite || self.overwriteAllFiles) ? ["-y"] : []
+                    args2 += [
                         "-i", mxfFile.path,
                         "-i", tempVideoURL.path,
                         "-map", "1:v:0",
@@ -1184,6 +1273,46 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 }
             }
         }
+    }
+
+    private enum DuplicateFileAction {
+        case overwrite
+        case skip
+        case overwriteAll
+        case skipAll
+        case cancel
+    }
+
+    private func showDuplicateFileAlert(fileName: String, completion: @escaping (DuplicateFileAction) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "File Already Exists"
+        alert.informativeText = "The file \"\(fileName)\" already exists in the output folder."
+        alert.alertStyle = .warning
+
+        alert.addButton(withTitle: "Overwrite")
+        alert.addButton(withTitle: "Skip")
+        alert.addButton(withTitle: "Overwrite All")
+        alert.addButton(withTitle: "Skip All")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        switch response {
+        case .alertFirstButtonReturn:  // Overwrite
+            completion(.overwrite)
+        case .alertSecondButtonReturn: // Skip
+            completion(.skip)
+        case .alertThirdButtonReturn:  // Overwrite All
+            completion(.overwriteAll)
+        case NSApplication.ModalResponse(rawValue: 1003): // Skip All
+            completion(.skipAll)
+        default: // Cancel
+            completion(.cancel)
+        }
+    }
+
+    private func continueProcessing(index: Int, mxfFiles: [URL], proxyFolderURL: URL, outputFormat: OutputFormat, outputFileURL: URL, shouldOverwrite: Bool, completion: @escaping @Sendable () -> Void) {
+        // Continue processing with forceOverwrite flag to bypass duplicate check
+        self.processNextFile(index: index, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, forceOverwrite: shouldOverwrite, completion: completion)
     }
 
     private func runProcessDetached(executableURL: URL?, arguments: [String], logURL: URL, completion: @escaping @Sendable (Int32) -> Void) {
@@ -1686,6 +1815,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             let closeAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: mainLabelColor]
             closeButton.attributedTitle = NSAttributedString(string: closeButton.title, attributes: closeAttrs)
             contentView.addSubview(closeButton)
+
+            // Add UUID label at the bottom
+            let uuidLabel = NSTextField(labelWithString: "Build: \(sessionUUID)")
+            uuidLabel.frame = NSRect(x: 10, y: 5, width: 380, height: 12)
+            uuidLabel.font = NSFont.systemFont(ofSize: 9)
+            uuidLabel.textColor = NSColor.secondaryLabelColor
+            uuidLabel.alignment = .center
+            contentView.addSubview(uuidLabel)
 
             settingsWin.contentView = contentView
             settingsWin.delegate = self
