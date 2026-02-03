@@ -159,6 +159,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     var window: NSWindow?
     weak var settingsWindow: NSWindow?
     weak var lutManagementWindow: NSWindow?
+    weak var watermarkManagementWindow: NSWindow?
     private var formatButtons: [NSButton] = []
     private var modeButtons: [NSButton] = []
     private let sessionUUID = UUID().uuidString
@@ -396,6 +397,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             lutManagementWindow?.orderOut(nil)
             lutManagementWindow = nil
             return false  // Prevent the actual close
+        } else if sender === watermarkManagementWindow {
+            // X button = Cancel (don't save)
+            watermarkManagementWindow?.orderOut(nil)
+            watermarkManagementWindow = nil
+            return false  // Prevent the actual close
         }
 
         // Allow main window to close normally (quits the app)
@@ -466,8 +472,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         updateWindowColors()
         updateSettingsWindowColors()
         updateLUTManagementWindowColors()
+        updateWatermarkManagementWindowColors()
     }
-    
+
     @objc func watermarkCheckboxChanged(_ sender: NSButton) {
         let isEnabled = (sender.state == .on)
         UserDefaults.standard.set(isEnabled, forKey: "watermarkEnabled")
@@ -816,7 +823,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             }
         }
     }
-    
+
+    private func updateWatermarkManagementWindowColors() {
+        guard let wmWin = watermarkManagementWindow, wmWin.isVisible, let contentView = wmWin.contentView else { return }
+
+        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+
+        // Update title bar color
+        let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
+        wmWin.backgroundColor = titleBarColor
+
+        // Update appearance explicitly without animations
+        let savedBehavior = wmWin.animationBehavior
+        wmWin.animationBehavior = .none
+        if #available(macOS 10.14, *) {
+            wmWin.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        }
+        wmWin.animationBehavior = savedBehavior
+
+        // Update content background without implicit animations
+        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        contentView.layer?.backgroundColor = bgColor.cgColor
+        CATransaction.commit()
+
+        // Update all labels and buttons
+        let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+        for subview in contentView.subviews {
+            if let label = subview as? NSTextField, !label.isEditable {
+                label.textColor = textColor
+            } else if let button = subview as? NSButton {
+                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+                button.attributedTitle = NSAttributedString(string: button.title, attributes: attrs)
+            }
+        }
+    }
+
     private func updateDropViewColor() {
         let color: NSColor
         let mode = currentMode
@@ -987,7 +1030,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Find watermark in Resources
         let watermarkURL = Bundle.main.resourceURL?.appendingPathComponent("watermark.png")
         let watermarkEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
-        let hasWatermark = watermarkEnabled && watermarkURL != nil && FileManager.default.fileExists(atPath: watermarkURL?.path ?? "")
+        let watermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "default"
+        let customWatermarkText = UserDefaults.standard.string(forKey: "watermarkCustomText") ?? ""
+        let hasDefaultWatermark = watermarkEnabled && watermarkMode == "default" && watermarkURL != nil && FileManager.default.fileExists(atPath: watermarkURL?.path ?? "")
+        let hasCustomTextWatermark = watermarkEnabled && watermarkMode == "custom" && !customWatermarkText.isEmpty
+        let hasWatermark = hasDefaultWatermark || hasCustomTextWatermark
+
+        // Debug log watermark settings
+        appendLog(logURL: logURL, entry: "Watermark settings: enabled=\(watermarkEnabled), mode=\(watermarkMode), customText='\(customWatermarkText)', hasDefault=\(hasDefaultWatermark), hasCustomText=\(hasCustomTextWatermark)\n")
+
+        // Escape text for ffmpeg drawtext filter (for Process, not shell)
+        // Only need single backslash escapes when not going through a shell
+        let escapedCustomText = customWatermarkText
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: ":", with: "\\:")
+            .replacingOccurrences(of: ",", with: "\\,")
+            .replacingOccurrences(of: ";", with: "\\;")
+
+        // Helper to escape file paths for ffmpeg filter syntax (Process, not shell)
+        func escapePathForFFmpegFilter(_ path: String) -> String {
+            return path
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+                .replacingOccurrences(of: ":", with: "\\:")
+        }
+
+        // Font file for drawtext filter on macOS (must be specified explicitly)
+        let fontFile = escapePathForFFmpegFilter("/System/Library/Fonts/Helvetica.ttc")
 
         let ffmpegURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("ffmpeg")
         let debugPath = ffmpegURL?.path ?? "nil"
@@ -1040,14 +1110,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         
                         // Step 2: Apply LUT and/or watermark to AVFoundation intermediate
                         var args: [String]
-                        if hasWatermark {
-                            // Build filter chain with optional LUT
+                        if hasDefaultWatermark {
+                            // Build filter chain with optional LUT and image watermark
                             var filterChain = "[0:v]"
                             if hasLUT {
-                                filterChain += "lut3d=file='\(lutPath!)',"
+                                filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                             }
                             filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
-                            
+
                             args = [
                                 "-i", intermediateURL.path,
                                 "-i", watermarkURL!.path,
@@ -1062,7 +1132,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                 "-crf", "18",
                                 "-c:a", "copy",
                                 "-map_metadata:s:a", "2:s:a",
-                                "-disposition:a", "copy",
+                                "-sn",
+                                outputFileURL.path
+                            ]
+                        } else if hasCustomTextWatermark {
+                            // Build filter chain with optional LUT and custom text watermark
+                            var filterChain = ""
+                            if hasLUT {
+                                filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
+                            }
+                            // Custom text: centered horizontally, 10% up from bottom, white at 50% opacity
+                            // Font size: 144 for height > 1800, 72 otherwise
+                            filterChain += "drawtext=fontfile=\(fontFile):text=\(escapedCustomText):fontsize=if(gt(h\\,1800)\\,144\\,72):fontcolor=white@0.5:x=(w-text_w)/2:y=h*9/10-text_h"
+
+                            self.appendLog(logURL: logURL, entry: "MOV->QT CUSTOM TEXT PATH: filterChain=\(filterChain)\n")
+
+                            args = [
+                                "-i", intermediateURL.path,
+                                "-i", mxfFile.path,
+                                "-vf", filterChain,
+                                "-map", "1:d?",
+                                "-c:d", "copy",
+                                "-map", "0:v",
+                                "-map", "1:a?",
+                                "-c:v", "libx264",
+                                "-preset", "fast",
+                                "-crf", "18",
+                                "-c:a", "copy",
+                                "-map_metadata:s:a", "1:s:a",
                                 "-sn",
                                 outputFileURL.path
                             ]
@@ -1072,7 +1169,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                 args = [
                                     "-i", intermediateURL.path,
                                     "-i", mxfFile.path,
-                                    "-vf", "lut3d=file='\(lutPath!)'",
+                                    "-vf", "lut3d=file=\(escapePathForFFmpegFilter(lutPath!))",
                                     "-map", "1:d?",
                                     "-c:d", "copy",
                                     "-map", "0:v",
@@ -1082,7 +1179,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                     "-crf", "18",
                                     "-c:a", "copy",
                                     "-map_metadata:s:a", "1:s:a",
-                                    "-disposition:a", "copy",
                                     "-sn",
                                     outputFileURL.path
                                 ]
@@ -1099,7 +1195,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                     "-crf", "18",
                                     "-c:a", "copy",
                                     "-map_metadata:s:a", "1:s:a",
-                                    "-disposition:a", "copy",
                                     "-sn",
                                     outputFileURL.path
                                 ]
@@ -1134,22 +1229,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 var videoFilterArgs: [String]
                 var videoMapArgs: [String]
 
-                if hasWatermark {
+                self.appendLog(logURL: logURL, entry: "MXF->QT: Watermark check: hasDefaultWatermark=\(hasDefaultWatermark), hasCustomTextWatermark=\(hasCustomTextWatermark), escapedCustomText='\(escapedCustomText)'\n")
+
+                if hasDefaultWatermark {
                     // Add watermark input
                     args += ["-i", watermarkURL!.path]
 
-                    // Build filter chain with optional LUT
+                    // Build filter chain with optional LUT and image watermark
                     var filterChain = "[0:v]"
                     if hasLUT {
-                        filterChain += "lut3d=file='\(lutPath!)',"
+                        filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
                     filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
 
                     videoFilterArgs = ["-filter_complex", filterChain]
                     videoMapArgs = ["-map", "[v]"]
+                } else if hasCustomTextWatermark {
+                    // Build filter chain with optional LUT and custom text watermark
+                    var filterChain = ""
+                    if hasLUT {
+                        filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
+                    }
+                    // Custom text: centered horizontally, 10% up from bottom, white at 50% opacity
+                    filterChain += "drawtext=fontfile=\(fontFile):text=\(escapedCustomText):fontsize=if(gt(h\\,1800)\\,144\\,72):fontcolor=white@0.5:x=(w-text_w)/2:y=h*9/10-text_h"
+
+                    self.appendLog(logURL: logURL, entry: "MXF->QT CUSTOM TEXT: filterChain=\(filterChain)\n")
+
+                    videoFilterArgs = ["-vf", filterChain]
+                    videoMapArgs = ["-map", "0:v"]
                 } else if hasLUT {
                     // LUT only, no watermark
-                    videoFilterArgs = ["-vf", "lut3d=file='\(lutPath!)'"]
+                    videoFilterArgs = ["-vf", "lut3d=file=\(escapePathForFFmpegFilter(lutPath!))"]
                     videoMapArgs = ["-map", "0:v"]
                 } else {
                     // No watermark, no LUT
@@ -1166,10 +1276,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     "-map", "0:a?",
                     "-c:a", "copy",
                     "-map_metadata", "0",
-                    "-disposition:a", "copy",
                     "-sn",
                     outputFileURL.path
                 ]
+
+                self.appendLog(logURL: logURL, entry: "MXF->QT FULL ARGS: \(args.joined(separator: " "))\n")
 
                 runProcessDetached(executableURL: ffmpegURL, arguments: args, logURL: logURL) { [weak self] status in
                     DispatchQueue.main.async { [weak self] in
@@ -1198,22 +1309,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             var videoFilterArgs: [String]
             var videoMapArgs: [String]
 
-            if hasWatermark {
+            if hasDefaultWatermark {
                 // Add watermark input
                 args1 += ["-i", watermarkURL!.path]
 
-                // Build filter chain with optional LUT
+                // Build filter chain with optional LUT and image watermark
                 var filterChain = "[0:v]"
                 if hasLUT {
-                    filterChain += "lut3d=file='\(lutPath!)',"
+                    filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
                 filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
 
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
+            } else if hasCustomTextWatermark {
+                // Build filter chain with optional LUT and custom text watermark
+                var filterChain = ""
+                if hasLUT {
+                    filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
+                }
+                // Custom text: centered horizontally, 10% up from bottom, white at 50% opacity
+                filterChain += "drawtext=fontfile=\(fontFile):text=\(escapedCustomText):fontsize=if(gt(h\\,1800)\\,144\\,72):fontcolor=white@0.5:x=(w-text_w)/2:y=h*9/10-text_h"
+
+                videoFilterArgs = ["-vf", filterChain]
+                videoMapArgs = ["-map", "0:v"]
             } else if hasLUT {
                 // LUT only, no watermark
-                videoFilterArgs = ["-vf", "lut3d=file='\(lutPath!)'"]
+                videoFilterArgs = ["-vf", "lut3d=file=\(escapePathForFFmpegFilter(lutPath!))"]
                 videoMapArgs = ["-map", "0:v"]
             } else {
                 // No watermark, no LUT
@@ -1692,7 +1814,180 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         lutManagementWindow?.orderOut(nil)
         lutManagementWindow = nil
     }
-    
+
+    @objc func showWatermarkManagement() {
+        if watermarkManagementWindow == nil {
+            guard let mainWindow = window else { return }
+            let windowSize = NSSize(width: 400, height: 220)
+            let mainOrigin = mainWindow.frame.origin
+            let windowOrigin = NSPoint(x: mainOrigin.x + 100, y: mainOrigin.y + 100)
+
+            let wmWin = NSWindow(
+                contentRect: NSRect(origin: windowOrigin, size: windowSize),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            wmWin.title = "Watermark Settings"
+            wmWin.titlebarAppearsTransparent = true
+            wmWin.isRestorable = false
+
+            let isDark: Bool
+            if currentMode == .auto {
+                isDark = isSystemDarkAppearance()
+            } else if currentMode == .night {
+                isDark = true
+            } else {
+                isDark = false
+            }
+
+            let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
+            wmWin.backgroundColor = titleBarColor
+
+            if #available(macOS 10.14, *) {
+                wmWin.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+            }
+
+            let contentView = NSView()
+            contentView.wantsLayer = true
+            contentView.layer?.backgroundColor = (isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)).cgColor
+
+            let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+
+            // Title label
+            let titleLabel = NSTextField(labelWithString: "Watermark Type")
+            titleLabel.frame = NSRect(x: 20, y: 175, width: 200, height: 24)
+            titleLabel.font = NSFont.boldSystemFont(ofSize: 16)
+            titleLabel.textColor = textColor
+            contentView.addSubview(titleLabel)
+
+            // Load current mode from UserDefaults
+            let currentWatermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "default"
+            let currentCustomText = UserDefaults.standard.string(forKey: "watermarkCustomText") ?? ""
+
+            // Radio button: Default watermark
+            let defaultRadio = NSButton(radioButtonWithTitle: "Default watermark (image)", target: self, action: #selector(watermarkRadioClicked(_:)))
+            defaultRadio.frame = NSRect(x: 20, y: 140, width: 300, height: 20)
+            defaultRadio.tag = 0
+            defaultRadio.identifier = NSUserInterfaceItemIdentifier("defaultRadio")
+            defaultRadio.state = (currentWatermarkMode == "default") ? .on : .off
+            let defaultAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            defaultRadio.attributedTitle = NSAttributedString(string: defaultRadio.title, attributes: defaultAttrs)
+            contentView.addSubview(defaultRadio)
+
+            // Radio button: Custom text
+            let customRadio = NSButton(radioButtonWithTitle: "Custom text", target: self, action: #selector(watermarkRadioClicked(_:)))
+            customRadio.frame = NSRect(x: 20, y: 110, width: 150, height: 20)
+            customRadio.tag = 1
+            customRadio.identifier = NSUserInterfaceItemIdentifier("customRadio")
+            customRadio.state = (currentWatermarkMode == "custom") ? .on : .off
+            let customAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            customRadio.attributedTitle = NSAttributedString(string: customRadio.title, attributes: customAttrs)
+            contentView.addSubview(customRadio)
+
+            // Text field for custom text
+            let textField = NSTextField(frame: NSRect(x: 20, y: 75, width: 360, height: 24))
+            textField.stringValue = currentCustomText
+            textField.placeholderString = "Enter custom watermark text (max 48 characters)"
+            textField.isEnabled = (currentWatermarkMode == "custom")
+            textField.identifier = NSUserInterfaceItemIdentifier("watermarkTextField")
+            textField.target = self
+            textField.action = #selector(watermarkTextFieldChanged(_:))
+            contentView.addSubview(textField)
+
+            // Max length hint
+            let maxLenLabel = NSTextField(labelWithString: "(48 characters max.)")
+            maxLenLabel.frame = NSRect(x: 240, y: 50, width: 140, height: 16)
+            maxLenLabel.font = NSFont.systemFont(ofSize: 11)
+            maxLenLabel.textColor = NSColor.secondaryLabelColor
+            maxLenLabel.alignment = .right
+            contentView.addSubview(maxLenLabel)
+
+            // Cancel button
+            let cancelButton = NSButton(frame: NSRect(x: 100, y: 15, width: 90, height: 28))
+            cancelButton.title = "Cancel"
+            cancelButton.bezelStyle = .rounded
+            cancelButton.target = self
+            cancelButton.action = #selector(cancelWatermarkManagement)
+            let cancelAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            cancelButton.attributedTitle = NSAttributedString(string: cancelButton.title, attributes: cancelAttrs)
+            contentView.addSubview(cancelButton)
+
+            // Save button
+            let saveButton = NSButton(frame: NSRect(x: 210, y: 15, width: 90, height: 28))
+            saveButton.title = "Save"
+            saveButton.bezelStyle = .rounded
+            saveButton.target = self
+            saveButton.action = #selector(saveWatermarkManagement)
+            let saveAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            saveButton.attributedTitle = NSAttributedString(string: saveButton.title, attributes: saveAttrs)
+            contentView.addSubview(saveButton)
+
+            wmWin.contentView = contentView
+            wmWin.delegate = self
+            self.watermarkManagementWindow = wmWin
+        }
+
+        watermarkManagementWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func watermarkRadioClicked(_ sender: NSButton) {
+        // Just update UI - enable/disable text field based on selection
+        let isCustom = sender.tag == 1
+        if let contentView = watermarkManagementWindow?.contentView {
+            for subview in contentView.subviews {
+                if let textField = subview as? NSTextField,
+                   textField.identifier?.rawValue == "watermarkTextField" {
+                    textField.isEnabled = isCustom
+                }
+            }
+        }
+    }
+
+    @objc private func watermarkTextFieldChanged(_ sender: NSTextField) {
+        // Enforce 48 character limit on commit
+        if sender.stringValue.count > 48 {
+            sender.stringValue = String(sender.stringValue.prefix(48))
+        }
+    }
+
+    @objc private func saveWatermarkManagement() {
+        guard let contentView = watermarkManagementWindow?.contentView else { return }
+
+        // Find which radio is selected
+        var mode = "default"
+        var customText = ""
+
+        for subview in contentView.subviews {
+            if let radio = subview as? NSButton,
+               radio.identifier?.rawValue == "customRadio",
+               radio.state == .on {
+                mode = "custom"
+            }
+            if let textField = subview as? NSTextField,
+               textField.identifier?.rawValue == "watermarkTextField" {
+                customText = textField.stringValue
+                if customText.count > 48 {
+                    customText = String(customText.prefix(48))
+                }
+            }
+        }
+
+        // Save to UserDefaults
+        UserDefaults.standard.set(mode, forKey: "watermarkMode")
+        UserDefaults.standard.set(customText, forKey: "watermarkCustomText")
+
+        watermarkManagementWindow?.orderOut(nil)
+        watermarkManagementWindow = nil
+    }
+
+    @objc private func cancelWatermarkManagement() {
+        // Just close without saving
+        watermarkManagementWindow?.orderOut(nil)
+        watermarkManagementWindow = nil
+    }
+
     func setupMenuBar() {
         let mainMenu = NSMenu()
         let appMenu = NSMenu()
@@ -1758,6 +2053,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
             let mainLabelColor = formatLabel?.textColor ?? NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
 
+            let watermarkButton = NSButton(frame: NSRect(x: 100, y: 220, width: 200, height: 28))
+            watermarkButton.title = "Manage watermark"
+            watermarkButton.bezelStyle = .rounded
+            watermarkButton.target = self
+            watermarkButton.action = #selector(showWatermarkManagement)
+            let watermarkButtonAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: mainLabelColor]
+            watermarkButton.attributedTitle = NSAttributedString(string: watermarkButton.title, attributes: watermarkButtonAttrs)
+
             let lutButton = NSButton(frame: NSRect(x: 100, y: 185, width: 200, height: 28))
             lutButton.title = "Manage LUTs"
             lutButton.bezelStyle = .rounded
@@ -1800,6 +2103,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 contentView.layer?.backgroundColor = NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0).cgColor
             }
 
+            contentView.addSubview(watermarkButton)
             contentView.addSubview(lutButton)
             contentView.addSubview(modeLabel)
             for btn in modeButtons {
