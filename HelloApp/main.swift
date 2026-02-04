@@ -173,6 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var lutSelectButton: NSButton?
     private var lutLabel: NSTextField?
     private var dropLabel: NSTextField?
+    private var encodingPathLabel: NSTextField?
     private var dropBorderLayer: CAShapeLayer?
     private var gearButton: NSButton?
     private var selectedFormat: Int = 0
@@ -276,13 +277,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         self.dropBorderLayer = borderLayer
 
         let dropLabel = NSTextField(labelWithString: "Drag files or folders here")
-        dropLabel.frame = NSRect(x: 0, y: 100, width: 500, height: 30)
+        dropLabel.frame = NSRect(x: 0, y: 110, width: 500, height: 30)
         dropLabel.font = NSFont.systemFont(ofSize: 16)
         dropLabel.alignment = .center
         dropView.addSubview(dropLabel)
         self.dropLabel = dropLabel
-        
-        let queueCountLabel = NSTextField(labelWithString: "items in queue: 0")
+
+        let encodingPathLabel = NSTextField(labelWithString: "")
+        encodingPathLabel.frame = NSRect(x: 0, y: 75, width: 500, height: 30)
+        encodingPathLabel.font = NSFont.systemFont(ofSize: 12)
+        encodingPathLabel.alignment = .center
+        dropView.addSubview(encodingPathLabel)
+        self.encodingPathLabel = encodingPathLabel
+
+        let queueCountLabel = NSTextField(labelWithString: "Items in queue: 0")
         queueCountLabel.frame = NSRect(x: 0, y: 10, width: 500, height: 20)
         queueCountLabel.font = NSFont.systemFont(ofSize: 12)
         queueCountLabel.alignment = .center
@@ -327,6 +335,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Default to true on first launch
         if UserDefaults.standard.object(forKey: "watermarkEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "watermarkEnabled")
+        }
+        if UserDefaults.standard.object(forKey: "watermarkMode") == nil {
+            UserDefaults.standard.set("default", forKey: "watermarkMode")
         }
         watermarkCheckbox.state = UserDefaults.standard.bool(forKey: "watermarkEnabled") ? .on : .off
         self.watermarkCheckbox = watermarkCheckbox
@@ -428,15 +439,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             return
         }
         jobQueue.append(standardizedURL)
-        
+
         // Count clips for this job
         var isDir: ObjCBool = false
         FileManager.default.fileExists(atPath: standardizedURL.path, isDirectory: &isDir)
-        
+
         if isDir.boolValue {
             // Count MXF/MOV files in folder
             if let contents = try? FileManager.default.contentsOfDirectory(at: standardizedURL, includingPropertiesForKeys: nil) {
-                let fileCount = contents.filter { 
+                let fileCount = contents.filter {
                     let ext = $0.pathExtension.lowercased()
                     return ext == "mxf" || ext == "mov"
                 }.count
@@ -446,7 +457,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             // Single file
             totalClipsQueued += 1
         }
-        
+
         updateDropZoneAvailability()
         startNextJobIfNeeded()
     }
@@ -454,7 +465,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
     private func updateDropZoneAvailability() {
         dropView?.isDropEnabled = true
-        queueCountLabel?.stringValue = "items in queue: \(totalClipsQueued)"
+        queueCountLabel?.stringValue = "Items in queue: \(totalClipsQueued)"
     }
     
     @objc func formatButtonClicked(_ sender: NSButton) {
@@ -915,17 +926,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             
             var mxfFiles: [URL] = []
             var proxyFolderURL: URL
-            
+            var proxyFolderName: String
+
             // Check if url is a file or folder
             var isDir: ObjCBool = false
             FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-            
+
             if isDir.boolValue {
                 // It's a folder - use existing behavior
                 let folderName = url.lastPathComponent
                 let parentURL = url.deletingLastPathComponent()
-                proxyFolderURL = parentURL.appendingPathComponent("\(folderName) proxies")
-                
+                proxyFolderName = "\(folderName) proxies"
+                proxyFolderURL = parentURL.appendingPathComponent(proxyFolderName)
+
                 do {
                     let contents = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
                     let ext = { (u: URL) -> String in u.pathExtension.lowercased() }
@@ -938,22 +951,81 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             } else {
                 // It's a file
                 let parentURL = url.deletingLastPathComponent()
-                proxyFolderURL = parentURL.appendingPathComponent("m2p-proxies")
+                proxyFolderName = "m2p-proxies"
+                proxyFolderURL = parentURL.appendingPathComponent(proxyFolderName)
                 mxfFiles = [url]
             }
-            
-            do {
-                try FileManager.default.createDirectory(at: proxyFolderURL, withIntermediateDirectories: true)
-            } catch {
-                print("Error: \(error)")
-                completion()
-                return
-            }
 
-            // Dispatch back to main thread before starting processing
+            // Capture values for use in closures
+            let finalProxyFolderURL = proxyFolderURL
+            let finalProxyFolderName = proxyFolderName
+            let finalMxfFiles = mxfFiles
+
+            // Show destination dialog on main thread
             DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.processNextFile(index: 0, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
+                guard let self = self, let mainWindow = self.window else { return }
+
+                let alert = NSAlert()
+                alert.messageText = "Use default destination or select a custom destination?"
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "Default")
+                alert.addButton(withTitle: "Select Destination")
+                alert.beginSheetModal(for: mainWindow) { [weak self] response in
+                    guard let self = self else { return }
+
+                    var destinationURL = finalProxyFolderURL
+
+                    if response == .alertSecondButtonReturn {
+                        // User chose to select destination
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = false
+                        panel.canChooseDirectories = true
+                        panel.canCreateDirectories = true
+                        panel.allowsMultipleSelection = false
+                        panel.prompt = "Select"
+                        panel.message = "Choose destination folder for proxies"
+
+                        let panelShowTime = Date()
+                        if panel.runModal() == .OK, let selectedURL = panel.url {
+                            // Check if folder was just created (creation date after panel was shown)
+                            var isNewlyCreated = false
+                            if let attrs = try? FileManager.default.attributesOfItem(atPath: selectedURL.path),
+                               let creationDate = attrs[.creationDate] as? Date,
+                               creationDate > panelShowTime {
+                                isNewlyCreated = true
+                            }
+
+                            if isNewlyCreated {
+                                // User created a new folder - use it directly
+                                destinationURL = selectedURL
+                            } else {
+                                // Existing folder - create proxy subfolder inside
+                                destinationURL = selectedURL.appendingPathComponent(finalProxyFolderName)
+                            }
+                        } else {
+                            // User cancelled - abort
+                            completion()
+                            return
+                        }
+                    }
+
+                    // Continue on background thread
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do {
+                            try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+                        } catch {
+                            print("Error: \(error)")
+                            DispatchQueue.main.async { completion() }
+                            return
+                        }
+
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self = self else { return }
+                            self.encodingPathLabel?.stringValue = "Encoding to: \(destinationURL.path)"
+                            self.processNextFile(index: 0, mxfFiles: finalMxfFiles, proxyFolderURL: destinationURL, outputFormat: outputFormat, completion: completion)
+                        }
+                    }
+                }
             }
         }
     }
@@ -961,6 +1033,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private func processNextFile(index: Int, mxfFiles: [URL], proxyFolderURL: URL, outputFormat: OutputFormat, forceOverwrite: Bool = false, completion: @escaping @Sendable () -> Void) {
         guard index < mxfFiles.count else {
             print("Conversion complete: \(proxyFolderURL.path)")
+            self.encodingPathLabel?.stringValue = "Encoded to: \(proxyFolderURL.path)"
             completion()
             return
         }
@@ -1064,11 +1137,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let debugLog = "Using ffmpeg at: \(debugPath)\n"
         appendLog(logURL: logURL, entry: debugLog)
 
-        let quickTimeCodecArgs = [
-            "-c:v", "h264_videotoolbox",
-            "-b:v", "10M",
-            "-pix_fmt", "yuv420p"
-        ]
+        // Get video dimensions using ffmpeg (AVFoundation can't read MXF)
+        var videoWidth: Int = 0
+        if let ffmpegPath = ffmpegURL?.path {
+            let probe = Process()
+            probe.executableURL = URL(fileURLWithPath: ffmpegPath)
+            probe.arguments = ["-i", mxfFile.path, "-hide_banner"]
+            let pipe = Pipe()
+            probe.standardError = pipe  // ffmpeg outputs info to stderr
+            try? probe.run()
+            probe.waitUntilExit()
+            if let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) {
+                // Parse "1234x5678" from output
+                let pattern = #"(\d{3,5})x(\d{3,5})"#
+                if let regex = try? NSRegularExpression(pattern: pattern),
+                   let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
+                   let widthRange = Range(match.range(at: 1), in: output) {
+                    videoWidth = Int(output[widthRange]) ?? 0
+                }
+            }
+        }
+        appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth)\n")
+
+        // Use software encoder for oversized videos (VideoToolbox H.264 max is ~4096 width)
+        let useHardwareEncoder = videoWidth > 0 && videoWidth <= 4096
+        let h264Codec = useHardwareEncoder ? "h264_videotoolbox" : "libx264"
+        let h264PresetArgs = useHardwareEncoder ? [] : ["-preset", "fast"]
+        if !useHardwareEncoder {
+            appendLog(logURL: logURL, entry: "Using software encoder (libx264) - width \(videoWidth) exceeds 4096 or unknown\n")
+        }
+        let quickTimeCodecArgs = ["-c:v", h264Codec] + h264PresetArgs + ["-b:v", "10M", "-pix_fmt", "yuv420p"]
 
         let mxfCodecArgs = [
             "-c:v", "mpeg2video",
@@ -1126,7 +1224,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                 "-c:d", "copy",
                                 "-map", "[v]",
                                 "-map", "2:a?",
-                                "-c:v", "h264_videotoolbox",
+                                "-c:v", h264Codec,
                                 "-b:v", "10M",
                                 "-c:a", "copy",
                                 "-map_metadata:s:a", "2:s:a",
@@ -1153,7 +1251,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                 "-c:d", "copy",
                                 "-map", "0:v",
                                 "-map", "1:a?",
-                                "-c:v", "h264_videotoolbox",
+                                "-c:v", h264Codec,
                                 "-b:v", "10M",
                                 "-c:a", "copy",
                                 "-map_metadata:s:a", "1:s:a",
@@ -1171,7 +1269,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                     "-c:d", "copy",
                                     "-map", "0:v",
                                     "-map", "1:a?",
-                                    "-c:v", "h264_videotoolbox",
+                                    "-c:v", h264Codec,
                                     "-b:v", "10M",
                                     "-c:a", "copy",
                                     "-map_metadata:s:a", "1:s:a",
@@ -1186,7 +1284,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                     "-c:d", "copy",
                                     "-map", "0:v",
                                     "-map", "1:a?",
-                                    "-c:v", "h264_videotoolbox",
+                                    "-c:v", h264Codec,
                                     "-b:v", "10M",
                                     "-c:a", "copy",
                                     "-map_metadata:s:a", "1:s:a",
@@ -2115,13 +2213,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             closeButton.attributedTitle = NSAttributedString(string: closeButton.title, attributes: closeAttrs)
             contentView.addSubview(closeButton)
 
-            // Add UUID label at the bottom
-            let uuidLabel = NSTextField(labelWithString: "Build: \(sessionUUID)")
-            uuidLabel.frame = NSRect(x: 10, y: 5, width: 380, height: 12)
-            uuidLabel.font = NSFont.systemFont(ofSize: 9)
-            uuidLabel.textColor = NSColor.secondaryLabelColor
-            uuidLabel.alignment = .center
-            contentView.addSubview(uuidLabel)
+            // Add build number label at the bottom
+            let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
+            let buildLabel = NSTextField(labelWithString: "Build: \(buildNumber)")
+            buildLabel.frame = NSRect(x: 10, y: 5, width: 380, height: 12)
+            buildLabel.font = NSFont.systemFont(ofSize: 9)
+            buildLabel.textColor = NSColor.secondaryLabelColor
+            buildLabel.alignment = .center
+            contentView.addSubview(buildLabel)
 
             settingsWin.contentView = contentView
             settingsWin.delegate = self
