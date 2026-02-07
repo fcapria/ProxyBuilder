@@ -198,6 +198,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var encodingPathLabel: ClickableLabel?
     private var encodingPathURL: URL?
     private var encodingPathPrefix: String?
+    private var destinationPopup: NSPopUpButton?
+    private var destinationLabel: NSTextField?
+    private var selectedDestinationURL: URL?
     private var dropBorderLayer: CAShapeLayer?
     private var gearButton: NSButton?
     private var selectedFormat: Int = 0
@@ -293,12 +296,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         formatPopup.action = #selector(formatPopupChanged(_:))
         self.formatPopup = formatPopup
 
+        // Destination label and popup
+        let destinationLabel = NSTextField(labelWithString: "Dest.")
+        destinationLabel.frame = NSRect(x: 345, y: 376, width: 50, height: 20)
+        self.destinationLabel = destinationLabel
+
+        let destinationPopup = NSPopUpButton(frame: NSRect(x: 400, y: 373, width: 140, height: 26))
+        destinationPopup.addItems(withTitles: ["Default", "Select"])
+        destinationPopup.target = self
+        destinationPopup.action = #selector(destinationPopupChanged(_:))
+        self.destinationPopup = destinationPopup
+
+        // Restore destination from UserDefaults
+        let savedDestMode = UserDefaults.standard.integer(forKey: "destinationMode")
+        if savedDestMode == 1, let savedPath = UserDefaults.standard.string(forKey: "destinationPath") {
+            let url = URL(fileURLWithPath: savedPath)
+            if FileManager.default.fileExists(atPath: savedPath) {
+                selectedDestinationURL = url
+                destinationPopup.selectItem(at: 1)
+            }
+        }
+
         // Codec label and popup
         let codecLabel = NSTextField(labelWithString: "Codec")
-        codecLabel.frame = NSRect(x: 345, y: 376, width: 50, height: 20)
+        codecLabel.frame = NSRect(x: 345, y: 346, width: 50, height: 20)
         self.codecLabel = codecLabel
 
-        let codecPopup = NSPopUpButton(frame: NSRect(x: 400, y: 373, width: 140, height: 26))
+        let codecPopup = NSPopUpButton(frame: NSRect(x: 400, y: 343, width: 140, height: 26))
         codecPopup.target = self
         codecPopup.action = #selector(codecPopupChanged(_:))
         self.codecPopup = codecPopup
@@ -389,7 +413,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Watermark checkbox
         let watermarkCheckbox = NSButton(checkboxWithTitle: "Apply watermark", target: self, action: #selector(watermarkCheckboxChanged(_:)))
-        watermarkCheckbox.frame = NSRect(x: 345, y: 346, width: 140, height: 20)
+        watermarkCheckbox.frame = NSRect(x: 345, y: 316, width: 140, height: 20)
         // Default to true on first launch
         if UserDefaults.standard.object(forKey: "watermarkEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "watermarkEnabled")
@@ -402,10 +426,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // LUT checkbox and popup
         let lutCheckbox = NSButton(checkboxWithTitle: "Apply LUT", target: self, action: #selector(lutCheckboxChanged(_:)))
-        lutCheckbox.frame = NSRect(x: 345, y: 316, width: 90, height: 20)
+        lutCheckbox.frame = NSRect(x: 345, y: 286, width: 90, height: 20)
         self.lutCheckbox = lutCheckbox
 
-        let lutPopup = NSPopUpButton(frame: NSRect(x: 435, y: 313, width: 120, height: 26))
+        let lutPopup = NSPopUpButton(frame: NSRect(x: 435, y: 283, width: 120, height: 26))
         lutPopup.target = self
         lutPopup.action = #selector(lutPopupChanged(_:))
         self.lutPopup = lutPopup
@@ -413,7 +437,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // LUT filename label (below LUT row)
         let lutLabel = NSTextField(labelWithString: "")
-        lutLabel.frame = NSRect(x: 345, y: 290, width: 210, height: 16)
+        lutLabel.frame = NSRect(x: 345, y: 260, width: 210, height: 16)
         lutLabel.font = NSFont.systemFont(ofSize: 11)
         lutLabel.textColor = NSColor.secondaryLabelColor
         self.lutLabel = lutLabel
@@ -436,6 +460,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         
         contentView.addSubview(formatLabel)
         contentView.addSubview(formatPopup)
+        contentView.addSubview(destinationLabel)
+        contentView.addSubview(destinationPopup)
         contentView.addSubview(codecLabel)
         contentView.addSubview(codecPopup)
         contentView.addSubview(watermarkCheckbox)
@@ -454,6 +480,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         updateModeButtons()
         window.makeKeyAndOrderFront(nil)
         updateWindowColors()
+
+        // Show saved destination path on launch
+        if let destURL = selectedDestinationURL {
+            setEncodingPath("Will encode to", url: destURL)
+        }
 
         self.window = window
     }
@@ -544,6 +575,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         UserDefaults.standard.set(selectedCodecIndex, forKey: "selectedCodecIndex_\(selectedFormat)")
     }
 
+    @objc func destinationPopupChanged(_ sender: NSPopUpButton) {
+        if sender.indexOfSelectedItem == 1 {
+            // "Select" chosen - open folder picker
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.prompt = "Select"
+            panel.message = "Choose destination folder for proxies"
+
+            if panel.runModal() == .OK, let url = panel.url {
+                selectedDestinationURL = url
+                UserDefaults.standard.set(1, forKey: "destinationMode")
+                UserDefaults.standard.set(url.path, forKey: "destinationPath")
+                setEncodingPath("Will encode to", url: url)
+            } else {
+                // User cancelled - revert to Default
+                sender.selectItem(at: 0)
+                selectedDestinationURL = nil
+                UserDefaults.standard.set(0, forKey: "destinationMode")
+                UserDefaults.standard.removeObject(forKey: "destinationPath")
+                clearEncodingPath()
+            }
+        } else {
+            // "Default" chosen
+            selectedDestinationURL = nil
+            UserDefaults.standard.set(0, forKey: "destinationMode")
+            UserDefaults.standard.removeObject(forKey: "destinationPath")
+            clearEncodingPath()
+        }
+    }
+
     private func updateCodecPopup() {
         guard let popup = codecPopup else { return }
         popup.removeAllItems()
@@ -601,6 +665,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         ]))
         label.attributedStringValue = result
         label.useHandCursor = true
+        label.window?.invalidateCursorRects(for: label)
+    }
+
+    private func clearEncodingPath() {
+        encodingPathURL = nil
+        encodingPathPrefix = nil
+        guard let label = encodingPathLabel else { return }
+        label.stringValue = ""
+        label.useHandCursor = false
         label.window?.invalidateCursorRects(for: label)
     }
 
@@ -850,6 +923,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Update text color
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0) // #AAAAAA : #333333
         formatLabel?.textColor = textColor
+        destinationLabel?.textColor = textColor
         codecLabel?.textColor = textColor
 
         // Update queue count label color - green in dark mode
@@ -1116,74 +1190,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 mxfFiles = [url]
             }
 
-            // Capture values for use in closures
-            let finalProxyFolderURL = proxyFolderURL
-            let finalProxyFolderName = proxyFolderName
+            // Determine destination based on popup selection
             let finalMxfFiles = mxfFiles
 
-            // Show destination dialog on main thread
             DispatchQueue.main.async { [weak self] in
-                guard let self = self, let mainWindow = self.window else { return }
+                guard let self = self else { return }
 
-                let alert = NSAlert()
-                alert.messageText = "Use default destination or select a custom destination?"
-                alert.alertStyle = .informational
-                alert.addButton(withTitle: "Default")
-                alert.addButton(withTitle: "Select Destination")
-                alert.beginSheetModal(for: mainWindow) { [weak self] response in
-                    guard let self = self else { return }
+                var destinationURL = proxyFolderURL
 
-                    var destinationURL = finalProxyFolderURL
+                if let selectedDest = self.selectedDestinationURL {
+                    // "Select" mode - use remembered destination with proxy subfolder
+                    destinationURL = selectedDest.appendingPathComponent(proxyFolderName)
+                }
 
-                    if response == .alertSecondButtonReturn {
-                        // User chose to select destination
-                        let panel = NSOpenPanel()
-                        panel.canChooseFiles = false
-                        panel.canChooseDirectories = true
-                        panel.canCreateDirectories = true
-                        panel.allowsMultipleSelection = false
-                        panel.prompt = "Select"
-                        panel.message = "Choose destination folder for proxies"
-
-                        let panelShowTime = Date()
-                        if panel.runModal() == .OK, let selectedURL = panel.url {
-                            // Check if folder was just created (creation date after panel was shown)
-                            var isNewlyCreated = false
-                            if let attrs = try? FileManager.default.attributesOfItem(atPath: selectedURL.path),
-                               let creationDate = attrs[.creationDate] as? Date,
-                               creationDate > panelShowTime {
-                                isNewlyCreated = true
-                            }
-
-                            if isNewlyCreated {
-                                // User created a new folder - use it directly
-                                destinationURL = selectedURL
-                            } else {
-                                // Existing folder - create proxy subfolder inside
-                                destinationURL = selectedURL.appendingPathComponent(finalProxyFolderName)
-                            }
-                        } else {
-                            // User cancelled - abort
-                            completion()
-                            return
-                        }
+                // Continue on background thread
+                let finalDestinationURL = destinationURL
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try FileManager.default.createDirectory(at: finalDestinationURL, withIntermediateDirectories: true)
+                    } catch {
+                        print("Error: \(error)")
+                        DispatchQueue.main.async { completion() }
+                        return
                     }
 
-                    // Continue on background thread
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        do {
-                            try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
-                        } catch {
-                            print("Error: \(error)")
-                            DispatchQueue.main.async { completion() }
-                            return
-                        }
-
-                        DispatchQueue.main.async { [weak self] in
-                            guard let self = self else { return }
-                            self.setEncodingPath("Encoding to", url: destinationURL)
-                            self.processNextFile(index: 0, mxfFiles: finalMxfFiles, proxyFolderURL: destinationURL, outputFormat: outputFormat, completion: completion)
-                        }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.setEncodingPath("Encoding to", url: finalDestinationURL)
+                        self.processNextFile(index: 0, mxfFiles: finalMxfFiles, proxyFolderURL: finalDestinationURL, outputFormat: outputFormat, completion: completion)
                     }
                 }
             }
