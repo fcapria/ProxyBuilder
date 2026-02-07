@@ -18,23 +18,31 @@ mkdir -p MXF2PRXY.app/Contents/Resources
 # Copy binary
 cp .build/debug/MXFToQuickTime MXF2PRXY.app/Contents/MacOS/MXF2PRXY
 
-# Download static ffmpeg if not already present
-if [ ! -f /tmp/ffmpeg-static-cached ]; then
-    echo "Downloading static ffmpeg..."
-    curl -sL https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip -o /tmp/ffmpeg-static.zip
-    unzip -o /tmp/ffmpeg-static.zip -d /tmp/ > /dev/null
-    mv /tmp/ffmpeg /tmp/ffmpeg-static-cached
-    chmod +x /tmp/ffmpeg-static-cached
+# Use Homebrew ffmpeg (has working VideoToolbox hardware encoding)
+HOMEBREW_FFMPEG=$(which ffmpeg 2>/dev/null || echo "")
+if [ -n "$HOMEBREW_FFMPEG" ] && [ -f "$HOMEBREW_FFMPEG" ]; then
+    echo "Using Homebrew ffmpeg: $HOMEBREW_FFMPEG"
+    cp "$HOMEBREW_FFMPEG" MXF2PRXY.app/Contents/MacOS/ffmpeg
+else
+    echo "ERROR: Homebrew ffmpeg not found. Install with: brew install ffmpeg"
+    exit 1
 fi
-cp /tmp/ffmpeg-static-cached MXF2PRXY.app/Contents/MacOS/ffmpeg
 
 # Copy icon and resources
 cp AppIcon.icns MXF2PRXY.app/Contents/Resources/
 cp -f MXF2Prxy-logo.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
 cp -f watermark.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
 
+# Auto-increment build number
+CURRENT_BUILD=0
+if [ -f MXF2PRXY.app/Contents/Info.plist ]; then
+    CURRENT_BUILD=$(defaults read "$(pwd)/MXF2PRXY.app/Contents/Info.plist" CFBundleVersion 2>/dev/null || echo 0)
+fi
+NEW_BUILD=$((CURRENT_BUILD + 1))
+echo "Build number: $NEW_BUILD"
+
 # Create Info.plist
-cat > MXF2PRXY.app/Contents/Info.plist << 'PLIST'
+cat > MXF2PRXY.app/Contents/Info.plist << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -54,7 +62,7 @@ cat > MXF2PRXY.app/Contents/Info.plist << 'PLIST'
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>${NEW_BUILD}</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 </dict>

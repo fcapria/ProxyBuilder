@@ -2,8 +2,15 @@ import AppKit
 import AVFoundation
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
+@MainActor
+func setup() {
+    let delegate = AppDelegate()
+    app.delegate = delegate
+}
+
+MainActor.assumeIsolated {
+    setup()
+}
 _ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv)
 
 class OrangeButton: NSButton {
@@ -160,8 +167,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     weak var settingsWindow: NSWindow?
     weak var lutManagementWindow: NSWindow?
     weak var watermarkManagementWindow: NSWindow?
-    private var formatButtons: [NSButton] = []
+    private var formatPopup: NSPopUpButton?
     private var modeButtons: [NSButton] = []
+    private var codecLabel: NSTextField?
+    private var codecPopup: NSPopUpButton?
+    private var selectedCodecIndex: Int = 0
+    private var lutPopup: NSPopUpButton?
     private let sessionUUID = UUID().uuidString
     private var dropView: DropView?
     private var contentView: NSView?
@@ -170,7 +181,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var queueCountLabel: NSTextField?
     private var watermarkCheckbox: NSButton?
     private var lutCheckbox: NSButton?
-    private var lutSelectButton: NSButton?
     private var lutLabel: NSTextField?
     private var dropLabel: NSTextField?
     private var encodingPathLabel: NSTextField?
@@ -187,11 +197,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
     private enum OutputFormat {
         case quickTime
+        case mpeg4
         case mxf
     }
-    
-    private enum VideoCodec {
-        case proresProxy
+
+    private enum VideoCodec: Int, CaseIterable {
+        case h265 = 0
+        case h264 = 1
+        case proresProxy = 2
+        case dnxhrLB = 3
+        case mpeg2 = 4
+
+        var displayName: String {
+            switch self {
+            case .h265: return "H.265"
+            case .h264: return "H.264"
+            case .proresProxy: return "ProRes Proxy"
+            case .dnxhrLB: return "DNxHR LB"
+            case .mpeg2: return "MPEG-2"
+            }
+        }
+
+        static func codecs(for format: OutputFormat) -> [VideoCodec] {
+            switch format {
+            case .quickTime:
+                return [.h265, .h264, .proresProxy, .dnxhrLB]
+            case .mpeg4:
+                return [.h265, .h264]
+            case .mxf:
+                return [.mpeg2, .proresProxy, .dnxhrLB]
+            }
+        }
     }
     
     private enum DisplayMode {
@@ -231,23 +267,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
         }
 
+        // Output format label and popup
         let formatLabel = NSTextField(labelWithString: "Output")
-        formatLabel.frame = NSRect(x: 345, y: 366, width: 60, height: 20)
+        formatLabel.frame = NSRect(x: 345, y: 406, width: 50, height: 20)
         self.formatLabel = formatLabel
-        
-        // Create format buttons
-        let formatTitles = ["QuickTime", "MXF"]
-        var xPos: CGFloat = 400
-        for (index, title) in formatTitles.enumerated() {
-            let btn = NSButton(frame: NSRect(x: xPos, y: 365, width: 80, height: 28))
-            btn.title = title
-            btn.bezelStyle = .rounded
-            btn.tag = index
-            btn.target = self
-            btn.action = #selector(formatButtonClicked(_:))
-            formatButtons.append(btn)
-            xPos += 80
-        }
+
+        let formatPopup = NSPopUpButton(frame: NSRect(x: 400, y: 403, width: 120, height: 26))
+        formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4", "MXF"])
+        formatPopup.selectItem(at: selectedFormat)
+        formatPopup.target = self
+        formatPopup.action = #selector(formatPopupChanged(_:))
+        self.formatPopup = formatPopup
+
+        // Codec label and popup
+        let codecLabel = NSTextField(labelWithString: "Codec")
+        codecLabel.frame = NSRect(x: 345, y: 376, width: 50, height: 20)
+        self.codecLabel = codecLabel
+
+        let codecPopup = NSPopUpButton(frame: NSRect(x: 400, y: 373, width: 140, height: 26))
+        codecPopup.target = self
+        codecPopup.action = #selector(codecPopupChanged(_:))
+        self.codecPopup = codecPopup
 
         let button = OrangeButton(frame: NSRect(x: 200, y: 210, width: 200, height: 40))
         button.title = "Select files or folders"
@@ -285,7 +325,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         let encodingPathLabel = NSTextField(labelWithString: "")
         encodingPathLabel.frame = NSRect(x: 0, y: 75, width: 500, height: 30)
-        encodingPathLabel.font = NSFont.systemFont(ofSize: 12)
+        encodingPathLabel.font = NSFont.systemFont(ofSize: 16)
         encodingPathLabel.alignment = .center
         dropView.addSubview(encodingPathLabel)
         self.encodingPathLabel = encodingPathLabel
@@ -331,7 +371,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Watermark checkbox
         let watermarkCheckbox = NSButton(checkboxWithTitle: "Apply watermark", target: self, action: #selector(watermarkCheckboxChanged(_:)))
-        watermarkCheckbox.frame = NSRect(x: 345, y: 336, width: 140, height: 20)
+        watermarkCheckbox.frame = NSRect(x: 345, y: 346, width: 140, height: 20)
         // Default to true on first launch
         if UserDefaults.standard.object(forKey: "watermarkEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "watermarkEnabled")
@@ -342,40 +382,47 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         watermarkCheckbox.state = UserDefaults.standard.bool(forKey: "watermarkEnabled") ? .on : .off
         self.watermarkCheckbox = watermarkCheckbox
 
+        // LUT checkbox and popup
         let lutCheckbox = NSButton(checkboxWithTitle: "Apply LUT", target: self, action: #selector(lutCheckboxChanged(_:)))
-        lutCheckbox.frame = NSRect(x: 345, y: 306, width: 100, height: 20)
+        lutCheckbox.frame = NSRect(x: 345, y: 316, width: 90, height: 20)
         self.lutCheckbox = lutCheckbox
 
-        let lutSelectButton = NSButton(frame: NSRect(x: 450, y: 303, width: 110, height: 28))
-        lutSelectButton.title = "Select LUT"
-        lutSelectButton.bezelStyle = .rounded
-        lutSelectButton.target = self
-        lutSelectButton.action = #selector(showLUTMenu(_:))
-        self.lutSelectButton = lutSelectButton
-        
-        let lutLabel = NSTextField(labelWithString: "No LUT selected")
-        lutLabel.frame = NSRect(x: 345, y: 271, width: 200, height: 16)
+        let lutPopup = NSPopUpButton(frame: NSRect(x: 435, y: 313, width: 120, height: 26))
+        lutPopup.target = self
+        lutPopup.action = #selector(lutPopupChanged(_:))
+        self.lutPopup = lutPopup
+        populateLUTPopup()
+
+        // LUT filename label (below LUT row)
+        let lutLabel = NSTextField(labelWithString: "")
+        lutLabel.frame = NSRect(x: 345, y: 290, width: 210, height: 16)
         lutLabel.font = NSFont.systemFont(ofSize: 11)
         lutLabel.textColor = NSColor.secondaryLabelColor
         self.lutLabel = lutLabel
-        
-        // Check if LUT already selected
+
+        // Check if LUT already selected and set initial states
+        let lutEnabled = UserDefaults.standard.bool(forKey: "lutEnabled")
         if let savedLUT = UserDefaults.standard.string(forKey: "lutFilePath") {
             let lutPath = getLUTDirectoryURL().appendingPathComponent(savedLUT).path
             if FileManager.default.fileExists(atPath: lutPath) {
-                lutCheckbox.state = UserDefaults.standard.bool(forKey: "lutEnabled") ? .on : .off
-                lutLabel.stringValue = lutCheckbox.state == .on ? savedLUT : ""
-                // Color will be set by updateWindowColors()
+                lutCheckbox.state = lutEnabled ? .on : .off
+                selectLUTInPopup(savedLUT)
+                if lutEnabled {
+                    lutLabel.stringValue = savedLUT
+                    // Color will be set by updateWindowColors()
+                }
             }
         }
+        // Set initial enabled state for LUT popup
+        lutPopup.isEnabled = lutEnabled
         
         contentView.addSubview(formatLabel)
-        for btn in formatButtons {
-            contentView.addSubview(btn)
-        }
+        contentView.addSubview(formatPopup)
+        contentView.addSubview(codecLabel)
+        contentView.addSubview(codecPopup)
         contentView.addSubview(watermarkCheckbox)
         contentView.addSubview(lutCheckbox)
-        contentView.addSubview(lutSelectButton)
+        contentView.addSubview(lutPopup)
         contentView.addSubview(lutLabel)
         contentView.addSubview(button)
         contentView.addSubview(dropView)
@@ -385,7 +432,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         window.delegate = self
 
         // Apply colors after all views are added
-        updateFormatButtons()
+        updateCodecPopup()
         updateModeButtons()
         window.makeKeyAndOrderFront(nil)
         updateWindowColors()
@@ -468,12 +515,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         queueCountLabel?.stringValue = "Items in queue: \(totalClipsQueued)"
     }
     
-    @objc func formatButtonClicked(_ sender: NSButton) {
-        selectedFormat = sender.tag
+    @objc func formatPopupChanged(_ sender: NSPopUpButton) {
+        selectedFormat = sender.indexOfSelectedItem
         UserDefaults.standard.set(selectedFormat, forKey: "selectedFormatSegment")
-        updateFormatButtons()
+        updateCodecPopup()
     }
-    
+
+    @objc func codecPopupChanged(_ sender: NSPopUpButton) {
+        selectedCodecIndex = sender.indexOfSelectedItem
+        UserDefaults.standard.set(selectedCodecIndex, forKey: "selectedCodecIndex_\(selectedFormat)")
+    }
+
+    private func updateCodecPopup() {
+        guard let popup = codecPopup else { return }
+        popup.removeAllItems()
+        let format = currentOutputFormat()
+        let codecs = VideoCodec.codecs(for: format)
+        for codec in codecs {
+            popup.addItem(withTitle: codec.displayName)
+        }
+        // Reset to first codec (default) when format changes
+        selectedCodecIndex = 0
+        popup.selectItem(at: 0)
+        UserDefaults.standard.set(selectedCodecIndex, forKey: "selectedCodecIndex_\(selectedFormat)")
+    }
+
     @objc func modeButtonClicked(_ sender: NSButton) {
         selectedMode = sender.tag
         self.currentMode = selectedMode == 1 ? .night : (selectedMode == 2 ? .auto : .day)
@@ -494,20 +560,78 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     @objc func lutCheckboxChanged(_ sender: NSButton) {
         let isEnabled = (sender.state == .on)
         UserDefaults.standard.set(isEnabled, forKey: "lutEnabled")
-        
-        if !isEnabled {
-            lutLabel?.stringValue = ""
-        } else if let savedLUT = UserDefaults.standard.string(forKey: "lutFilePath"),
-                  FileManager.default.fileExists(atPath: getLUTDirectoryURL().appendingPathComponent(savedLUT).path) {
-            lutLabel?.stringValue = savedLUT
-            let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-            lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+
+        // Enable/disable LUT popup based on checkbox
+        lutPopup?.isEnabled = isEnabled
+
+        // Update LUT label
+        if isEnabled {
+            if let savedLUT = UserDefaults.standard.string(forKey: "lutFilePath"),
+               FileManager.default.fileExists(atPath: getLUTDirectoryURL().appendingPathComponent(savedLUT).path) {
+                lutLabel?.stringValue = savedLUT
+                let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+                lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+            }
         } else {
-            lutLabel?.stringValue = "No LUT selected"
-            lutLabel?.textColor = NSColor.secondaryLabelColor
+            lutLabel?.stringValue = ""
         }
     }
-    
+
+    @objc func lutPopupChanged(_ sender: NSPopUpButton) {
+        guard let selectedTitle = sender.titleOfSelectedItem else { return }
+        if selectedTitle == "Add LUT..." {
+            selectLUTFile()
+            // Revert to previous selection while file picker is open
+            if let savedLUT = UserDefaults.standard.string(forKey: "lutFilePath") {
+                selectLUTInPopup(savedLUT)
+            } else {
+                sender.selectItem(at: 0)
+            }
+        } else if selectedTitle != "No LUTs" {
+            UserDefaults.standard.set(selectedTitle, forKey: "lutFilePath")
+            UserDefaults.standard.set(true, forKey: "lutEnabled")
+            lutCheckbox?.state = .on
+            lutPopup?.isEnabled = true
+            // Update LUT label
+            lutLabel?.stringValue = selectedTitle
+            let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+            lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        }
+    }
+
+    private func populateLUTPopup() {
+        guard let popup = lutPopup else { return }
+        popup.removeAllItems()
+
+        let lutDir = getLUTDirectoryURL()
+        let fileManager = FileManager.default
+
+        do {
+            let files = try fileManager.contentsOfDirectory(at: lutDir, includingPropertiesForKeys: nil)
+            let lutFiles = files.filter { $0.pathExtension.lowercased() == "cube" }
+                                .map { $0.lastPathComponent }
+                                .sorted()
+
+            if lutFiles.isEmpty {
+                popup.addItem(withTitle: "No LUTs")
+            } else {
+                popup.addItems(withTitles: lutFiles)
+            }
+        } catch {
+            popup.addItem(withTitle: "No LUTs")
+        }
+
+        popup.menu?.addItem(NSMenuItem.separator())
+        popup.addItem(withTitle: "Add LUT...")
+    }
+
+    private func selectLUTInPopup(_ lutName: String) {
+        guard let popup = lutPopup else { return }
+        if let index = popup.itemTitles.firstIndex(of: lutName) {
+            popup.selectItem(at: index)
+        }
+    }
+
     @objc func selectLUTFile() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -531,6 +655,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 UserDefaults.standard.set(url.lastPathComponent, forKey: "lutFilePath")
                 UserDefaults.standard.set(true, forKey: "lutEnabled")
                 self.lutCheckbox?.state = .on
+                self.lutPopup?.isEnabled = true
+
+                // Refresh LUT popup and select the new LUT
+                self.populateLUTPopup()
+                self.selectLUTInPopup(url.lastPathComponent)
+
+                // Update LUT label
                 self.lutLabel?.stringValue = url.lastPathComponent
                 let isDark = self.currentMode == .auto ? self.isSystemDarkAppearance() : (self.currentMode == .night)
                 self.lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
@@ -546,24 +677,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
     }
     
-    private func updateFormatButtons() {
-        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-        let selectedColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
-        let selectedTextColor = isDark ? NSColor.black : NSColor(white: 1.0, alpha: 0.8)
-        for (index, btn) in formatButtons.enumerated() {
-            if index == selectedFormat {
-                btn.bezelColor = selectedColor
-                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: selectedTextColor]
-                btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
-            } else {
-                btn.bezelColor = isDark ? NSColor.darkGray : NSColor(calibratedWhite: 0.75, alpha: 1.0)
-                let textColor = isDark ? NSColor.lightGray : NSColor(white: 0.0, alpha: 0.8)
-                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
-                btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
-            }
-        }
-    }
-
     private func updateModeButtons() {
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
         let selectedColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
@@ -685,6 +798,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Update text color
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0) // #AAAAAA : #333333
         formatLabel?.textColor = textColor
+        codecLabel?.textColor = textColor
 
         // Update queue count label color - green in dark mode
         let queueCountColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : textColor // #68dd6d in dark mode
@@ -709,6 +823,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Update drop zone label color to match text, border stays accent color
         dropLabel?.textColor = textColor
+        encodingPathLabel?.textColor = textColor
         dropBorderLayer?.strokeColor = accentColor.cgColor
 
         // Update watermark checkbox text color
@@ -723,20 +838,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             checkbox.attributedTitle = NSAttributedString(string: checkbox.title, attributes: checkboxAttrs)
         }
 
-        // Update LUT select button text color
-        if let selectBtn = lutSelectButton {
-            let selectBtnAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
-            selectBtn.attributedTitle = NSAttributedString(string: selectBtn.title, attributes: selectBtnAttrs)
-        }
-
-        // Update LUT label color - green in dark mode when LUT is selected, otherwise secondary
-        if let label = lutLabel {
-            if label.stringValue.isEmpty || label.stringValue == "No LUT selected" {
-                label.textColor = NSColor.secondaryLabelColor
-            } else {
-                // LUT is selected - use green in dark mode, blue in light mode
-                label.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
-            }
+        // Update LUT label color - green in dark mode, blue in light mode (when LUT is selected)
+        if let label = lutLabel, !label.stringValue.isEmpty {
+            label.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
         }
 
         updateDropViewColor()
@@ -1043,6 +1147,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         switch outputFormat {
         case .quickTime:
             outputFileName = mxfFile.deletingPathExtension().lastPathComponent + ".mov"
+        case .mpeg4:
+            outputFileName = mxfFile.deletingPathExtension().lastPathComponent + ".mp4"
         case .mxf:
             outputFileName = mxfFile.deletingPathExtension().lastPathComponent + ".mxf"
         }
@@ -1159,21 +1265,53 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
         appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth)\n")
 
-        // Use software encoder for oversized videos (VideoToolbox H.264 max is ~4096 width)
+        // Use software encoder for oversized videos (VideoToolbox max is ~4096 width)
         let useHardwareEncoder = videoWidth > 0 && videoWidth <= 4096
-        let h264Codec = useHardwareEncoder ? "h264_videotoolbox" : "libx264"
-        let h264PresetArgs = useHardwareEncoder ? [] : ["-preset", "fast"]
-        if !useHardwareEncoder {
-            appendLog(logURL: logURL, entry: "Using software encoder (libx264) - width \(videoWidth) exceeds 4096 or unknown\n")
-        }
-        let quickTimeCodecArgs = ["-c:v", h264Codec] + h264PresetArgs + ["-b:v", "10M", "-pix_fmt", "yuv420p"]
 
-        let mxfCodecArgs = [
-            "-c:v", "mpeg2video",
-            "-b:v", "45M",
-            "-maxrate", "45M",
-            "-bufsize", "90M"
-        ]
+        // H.264 codec for intermediate conversions (MOV files need AVFoundation step)
+        let h264Codec = useHardwareEncoder ? "h264_videotoolbox" : "libx264"
+        let h264PixelFormat = useHardwareEncoder ? "nv12" : "yuv420p"
+
+        // Get selected codec
+        let selectedCodec = currentVideoCodec()
+        appendLog(logURL: logURL, entry: "Selected codec: \(selectedCodec.displayName)\n")
+
+        // Generate codec args based on selection
+        let videoCodecArgs: [String]
+        switch selectedCodec {
+        case .h265:
+            let codec = useHardwareEncoder ? "hevc_videotoolbox" : "libx265"
+            let presetArgs = useHardwareEncoder ? [] : ["-preset", "fast"]
+            let pixFmtArgs = useHardwareEncoder ? ["-pix_fmt", "p010le"] : []
+            videoCodecArgs = ["-c:v", codec] + presetArgs + pixFmtArgs + ["-b:v", "10M", "-tag:v", "hvc1"]
+        case .h264:
+            let codec = useHardwareEncoder ? "h264_videotoolbox" : "libx264"
+            let presetArgs = useHardwareEncoder ? [] : ["-preset", "fast"]
+            let pixFmtArgs = useHardwareEncoder ? ["-pix_fmt", "nv12"] : []
+            videoCodecArgs = ["-c:v", codec] + presetArgs + pixFmtArgs + ["-b:v", "10M"]
+        case .proresProxy:
+            videoCodecArgs = ["-c:v", "prores_ks", "-profile:v", "0", "-pix_fmt", "yuv422p10le"]
+        case .dnxhrLB:
+            videoCodecArgs = ["-c:v", "dnxhd", "-profile:v", "dnxhr_lb", "-pix_fmt", "yuv422p"]
+        case .mpeg2:
+            videoCodecArgs = ["-c:v", "mpeg2video", "-b:v", "45M", "-maxrate", "45M", "-bufsize", "90M"]
+        }
+
+        // Pixel format compatible with the selected encoder
+        // VideoToolbox requires semi-planar formats (p010le for HEVC, nv12 for H.264)
+        let videoPixelFormat: String
+        switch selectedCodec {
+        case .h265:
+            videoPixelFormat = useHardwareEncoder ? "p010le" : "yuv420p"
+        case .h264:
+            videoPixelFormat = useHardwareEncoder ? "nv12" : "yuv420p"
+        case .proresProxy, .dnxhrLB, .mpeg2:
+            videoPixelFormat = "yuv420p"
+        }
+
+        // Legacy aliases for compatibility
+        let quickTimeCodecArgs = videoCodecArgs
+        let mxfCodecArgs = videoCodecArgs
 
         switch outputFormat {
         case .quickTime:
@@ -1213,7 +1351,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                             if hasLUT {
                                 filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                             }
-                            filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+                            filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
 
                             args = [
                                 "-i", intermediateURL.path,
@@ -1333,7 +1471,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     if hasLUT {
                         filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
-                    filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+                    filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
 
                     videoFilterArgs = ["-filter_complex", filterChain]
                     videoMapArgs = ["-map", "[v]"]
@@ -1387,6 +1525,70 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     }
                 }
             }
+        case .mpeg4:
+            // MPEG-4 output - similar to QuickTime but without data tracks (not supported in MP4)
+            // Check for LUT
+            let lutEnabled = UserDefaults.standard.bool(forKey: "lutEnabled")
+            let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
+            let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
+            let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
+            self.appendLog(logURL: logURL, entry: "MPEG-4: LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
+
+            var args = (forceOverwrite || self.overwriteAllFiles) ? ["-y", "-i", mxfFile.path] : ["-i", mxfFile.path]
+            var videoFilterArgs: [String]
+            var videoMapArgs: [String]
+
+            if hasDefaultWatermark {
+                args += ["-i", watermarkURL!.path]
+                var filterChain = "[0:v]"
+                if hasLUT {
+                    filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
+                }
+                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+                videoFilterArgs = ["-filter_complex", filterChain]
+                videoMapArgs = ["-map", "[v]"]
+            } else if hasCustomTextWatermark {
+                var filterChain = ""
+                if hasLUT {
+                    filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
+                }
+                filterChain += "format=\(videoPixelFormat),drawtext=fontfile=\(fontFile):text=\(escapedCustomText):fontsize=if(gt(h\\,1800)\\,144\\,72):fontcolor=white@0.5:x=(w-text_w)/2:y=h*9/10-text_h"
+                videoFilterArgs = ["-vf", filterChain]
+                videoMapArgs = ["-map", "0:v"]
+            } else if hasLUT {
+                videoFilterArgs = ["-vf", "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),format=\(videoPixelFormat)"]
+                videoMapArgs = ["-map", "0:v"]
+            } else {
+                videoFilterArgs = ["-vf", "format=\(videoPixelFormat)"]
+                videoMapArgs = ["-map", "0:v"]
+            }
+
+            args += videoFilterArgs
+            args += videoMapArgs
+            args += videoCodecArgs
+            args += [
+                "-map", "0:a?",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-map_metadata", "0",
+                "-sn",
+                "-f", "mp4",
+                outputFileURL.path
+            ]
+
+            self.appendLog(logURL: logURL, entry: "MPEG-4 FULL ARGS: \(args.joined(separator: " "))\n")
+
+            runProcessDetached(executableURL: ffmpegURL, arguments: args, logURL: logURL) { [weak self] status in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if status != 0 {
+                        self.appendLog(logURL: logURL, entry: "FAILED: \(mxfFile.lastPathComponent)\n\n")
+                    }
+                    self.totalClipsQueued -= 1
+                    self.updateDropZoneAvailability()
+                    self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
+                }
+            }
         case .mxf:
             // Two-step process for MXF output
             // Check for LUT
@@ -1411,7 +1613,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=yuv420p[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
 
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
@@ -2238,11 +2440,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     // Removed LUT menu logic from settings page for clarity and to avoid conflicts.
     
     private func currentOutputFormat() -> OutputFormat {
-        return selectedFormat == 1 ? .mxf : .quickTime
+        switch selectedFormat {
+        case 0: return .quickTime
+        case 1: return .mpeg4
+        case 2: return .mxf
+        default: return .quickTime
+        }
     }
-    
+
     private func currentVideoCodec() -> VideoCodec {
-        return .proresProxy
+        let format = currentOutputFormat()
+        let codecs = VideoCodec.codecs(for: format)
+        let index = codecPopup?.indexOfSelectedItem ?? 0
+        guard index >= 0 && index < codecs.count else {
+            return codecs.first ?? .h265
+        }
+        return codecs[index]
     }
     
     private func convertProResWithAVFoundation(inputURL: URL, outputURL: URL, logURL: URL, completion: @escaping (Bool) -> Void) {
