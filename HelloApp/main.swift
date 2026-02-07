@@ -53,6 +53,18 @@ class FlippedView: NSView {
     override var isFlipped: Bool { return true }
 }
 
+class ClickableLabel: NSTextField {
+    var useHandCursor = false
+
+    override func resetCursorRects() {
+        if useHandCursor {
+            addCursorRect(bounds, cursor: .pointingHand)
+        } else {
+            super.resetCursorRects()
+        }
+    }
+}
+
 class DropView: NSView {
     var dropDelegate: DropViewDelegate?
     var isDropEnabled: Bool = true
@@ -183,8 +195,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var lutCheckbox: NSButton?
     private var lutLabel: NSTextField?
     private var dropLabel: NSTextField?
-    private var encodingPathLabel: NSTextField?
+    private var encodingPathLabel: ClickableLabel?
     private var encodingPathURL: URL?
+    private var encodingPathPrefix: String?
     private var dropBorderLayer: CAShapeLayer?
     private var gearButton: NSButton?
     private var selectedFormat: Int = 0
@@ -324,7 +337,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         dropView.addSubview(dropLabel)
         self.dropLabel = dropLabel
 
-        let encodingPathLabel = NSTextField(labelWithString: "")
+        let encodingPathLabel = ClickableLabel(labelWithString: "")
         encodingPathLabel.frame = NSRect(x: 0, y: 55, width: 500, height: 50)
         encodingPathLabel.font = NSFont.systemFont(ofSize: 16)
         encodingPathLabel.alignment = .center
@@ -562,22 +575,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         UserDefaults.standard.set(isEnabled, forKey: "watermarkEnabled")
     }
 
-    private func setEncodingPath(_ text: String, url: URL) {
+    private func setEncodingPath(_ prefix: String, url: URL) {
         encodingPathURL = url
+        encodingPathPrefix = prefix
         guard let label = encodingPathLabel else { return }
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-        let textColor = isDark ? NSColor.white : NSColor.black
+        let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
         let linkColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
 
-        // Split "Encoding to: /path" into prefix + newline + clickable path
-        let parts = text.components(separatedBy: ": ")
-        let prefix = (parts.first ?? "") + ":\n"
-        let path = parts.dropFirst().joined(separator: ": ").replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        let path = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
 
         let result = NSMutableAttributedString()
-        result.append(NSAttributedString(string: prefix, attributes: [
+        result.append(NSAttributedString(string: prefix + "\n", attributes: [
             .font: NSFont.systemFont(ofSize: 14),
             .foregroundColor: textColor,
             .paragraphStyle: paragraphStyle
@@ -589,6 +600,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             .paragraphStyle: paragraphStyle
         ]))
         label.attributedStringValue = result
+        label.useHandCursor = true
+        label.window?.invalidateCursorRects(for: label)
     }
 
     @objc func encodingPathClicked(_ sender: NSClickGestureRecognizer) {
@@ -862,8 +875,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Update drop zone label color to match text, border stays accent color
         dropLabel?.textColor = textColor
-        if let url = encodingPathURL {
-            setEncodingPath(encodingPathLabel?.stringValue ?? "", url: url)
+        if let url = encodingPathURL, let prefix = encodingPathPrefix {
+            setEncodingPath(prefix, url: url)
         } else {
             encodingPathLabel?.textColor = textColor
         }
@@ -1168,7 +1181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
                         DispatchQueue.main.async { [weak self] in
                             guard let self = self else { return }
-                            self.setEncodingPath("Encoding to: \(destinationURL.path)", url: destinationURL)
+                            self.setEncodingPath("Encoding to", url: destinationURL)
                             self.processNextFile(index: 0, mxfFiles: finalMxfFiles, proxyFolderURL: destinationURL, outputFormat: outputFormat, completion: completion)
                         }
                     }
@@ -1180,7 +1193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private func processNextFile(index: Int, mxfFiles: [URL], proxyFolderURL: URL, outputFormat: OutputFormat, forceOverwrite: Bool = false, completion: @escaping @Sendable () -> Void) {
         guard index < mxfFiles.count else {
             print("Conversion complete: \(proxyFolderURL.path)")
-            self.setEncodingPath("Encoded to: \(proxyFolderURL.path)", url: proxyFolderURL)
+            self.setEncodingPath("Encoded to", url: proxyFolderURL)
             completion()
             return
         }
