@@ -184,6 +184,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var lutLabel: NSTextField?
     private var dropLabel: NSTextField?
     private var encodingPathLabel: NSTextField?
+    private var encodingPathURL: URL?
     private var dropBorderLayer: CAShapeLayer?
     private var gearButton: NSButton?
     private var selectedFormat: Int = 0
@@ -324,11 +325,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         self.dropLabel = dropLabel
 
         let encodingPathLabel = NSTextField(labelWithString: "")
-        encodingPathLabel.frame = NSRect(x: 0, y: 75, width: 500, height: 30)
+        encodingPathLabel.frame = NSRect(x: 0, y: 55, width: 500, height: 50)
         encodingPathLabel.font = NSFont.systemFont(ofSize: 16)
         encodingPathLabel.alignment = .center
+        encodingPathLabel.maximumNumberOfLines = 2
         dropView.addSubview(encodingPathLabel)
         self.encodingPathLabel = encodingPathLabel
+
+        let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(encodingPathClicked))
+        encodingPathLabel.addGestureRecognizer(clickGesture)
 
         let queueCountLabel = NSTextField(labelWithString: "Items in queue: 0")
         queueCountLabel.frame = NSRect(x: 0, y: 10, width: 500, height: 20)
@@ -555,6 +560,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     @objc func watermarkCheckboxChanged(_ sender: NSButton) {
         let isEnabled = (sender.state == .on)
         UserDefaults.standard.set(isEnabled, forKey: "watermarkEnabled")
+    }
+
+    private func setEncodingPath(_ text: String, url: URL) {
+        encodingPathURL = url
+        guard let label = encodingPathLabel else { return }
+        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+        let textColor = isDark ? NSColor.white : NSColor.black
+        let linkColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+
+        // Split "Encoding to: /path" into prefix + newline + clickable path
+        let parts = text.components(separatedBy: ": ")
+        let prefix = (parts.first ?? "") + ":\n"
+        let path = parts.dropFirst().joined(separator: ": ").replacingOccurrences(of: NSHomeDirectory(), with: "~")
+
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: prefix, attributes: [
+            .font: NSFont.systemFont(ofSize: 14),
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraphStyle
+        ]))
+        result.append(NSAttributedString(string: path, attributes: [
+            .font: NSFont.systemFont(ofSize: 14),
+            .foregroundColor: linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .paragraphStyle: paragraphStyle
+        ]))
+        label.attributedStringValue = result
+    }
+
+    @objc func encodingPathClicked(_ sender: NSClickGestureRecognizer) {
+        guard let url = encodingPathURL else { return }
+        NSWorkspace.shared.open(url)
     }
 
     @objc func lutCheckboxChanged(_ sender: NSButton) {
@@ -823,7 +862,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Update drop zone label color to match text, border stays accent color
         dropLabel?.textColor = textColor
-        encodingPathLabel?.textColor = textColor
+        if let url = encodingPathURL {
+            setEncodingPath(encodingPathLabel?.stringValue ?? "", url: url)
+        } else {
+            encodingPathLabel?.textColor = textColor
+        }
         dropBorderLayer?.strokeColor = accentColor.cgColor
 
         // Update watermark checkbox text color
@@ -1125,7 +1168,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
                         DispatchQueue.main.async { [weak self] in
                             guard let self = self else { return }
-                            self.encodingPathLabel?.stringValue = "Encoding to: \(destinationURL.path)"
+                            self.setEncodingPath("Encoding to: \(destinationURL.path)", url: destinationURL)
                             self.processNextFile(index: 0, mxfFiles: finalMxfFiles, proxyFolderURL: destinationURL, outputFormat: outputFormat, completion: completion)
                         }
                     }
@@ -1137,7 +1180,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private func processNextFile(index: Int, mxfFiles: [URL], proxyFolderURL: URL, outputFormat: OutputFormat, forceOverwrite: Bool = false, completion: @escaping @Sendable () -> Void) {
         guard index < mxfFiles.count else {
             print("Conversion complete: \(proxyFolderURL.path)")
-            self.encodingPathLabel?.stringValue = "Encoded to: \(proxyFolderURL.path)"
+            self.setEncodingPath("Encoded to: \(proxyFolderURL.path)", url: proxyFolderURL)
             completion()
             return
         }
