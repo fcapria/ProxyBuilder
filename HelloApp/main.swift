@@ -180,7 +180,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     weak var lutManagementWindow: NSWindow?
     weak var watermarkManagementWindow: NSWindow?
     private var formatPopup: NSPopUpButton?
-    private var modeButtons: [NSButton] = []
+    private var modePopup: NSPopUpButton?
     private var codecLabel: NSTextField?
     private var codecPopup: NSPopUpButton?
     private var selectedCodecIndex: Int = 0
@@ -192,6 +192,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var button: NSButton?
     private var queueCountLabel: NSTextField?
     private var watermarkCheckbox: NSButton?
+    private var watermarkPopup: NSPopUpButton?
     private var lutCheckbox: NSButton?
     private var lutLabel: NSTextField?
     private var dropLabel: NSTextField?
@@ -286,10 +287,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Output format label and popup
         let formatLabel = NSTextField(labelWithString: "Output")
-        formatLabel.frame = NSRect(x: 345, y: 406, width: 50, height: 20)
+        formatLabel.frame = NSRect(x: 270, y: 406, width: 50, height: 20)
         self.formatLabel = formatLabel
 
-        let formatPopup = NSPopUpButton(frame: NSRect(x: 400, y: 403, width: 120, height: 26))
+        let formatPopup = NSPopUpButton(frame: NSRect(x: 325, y: 403, width: 150, height: 26))
         formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4", "MXF"])
         formatPopup.selectItem(at: selectedFormat)
         formatPopup.target = self
@@ -298,10 +299,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Destination label and popup
         let destinationLabel = NSTextField(labelWithString: "Dest.")
-        destinationLabel.frame = NSRect(x: 345, y: 376, width: 50, height: 20)
+        destinationLabel.frame = NSRect(x: 270, y: 376, width: 50, height: 20)
         self.destinationLabel = destinationLabel
 
-        let destinationPopup = NSPopUpButton(frame: NSRect(x: 400, y: 373, width: 140, height: 26))
+        let destinationPopup = NSPopUpButton(frame: NSRect(x: 325, y: 373, width: 150, height: 26))
         destinationPopup.addItems(withTitles: ["Default", "Select"])
         destinationPopup.target = self
         destinationPopup.action = #selector(destinationPopupChanged(_:))
@@ -319,10 +320,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Codec label and popup
         let codecLabel = NSTextField(labelWithString: "Codec")
-        codecLabel.frame = NSRect(x: 345, y: 346, width: 50, height: 20)
+        codecLabel.frame = NSRect(x: 270, y: 346, width: 50, height: 20)
         self.codecLabel = codecLabel
 
-        let codecPopup = NSPopUpButton(frame: NSRect(x: 400, y: 343, width: 140, height: 26))
+        let codecPopup = NSPopUpButton(frame: NSRect(x: 325, y: 343, width: 150, height: 26))
         codecPopup.target = self
         codecPopup.action = #selector(codecPopupChanged(_:))
         self.codecPopup = codecPopup
@@ -413,23 +414,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Watermark checkbox
         let watermarkCheckbox = NSButton(checkboxWithTitle: "Apply watermark", target: self, action: #selector(watermarkCheckboxChanged(_:)))
-        watermarkCheckbox.frame = NSRect(x: 345, y: 316, width: 140, height: 20)
+        watermarkCheckbox.frame = NSRect(x: 270, y: 316, width: 140, height: 20)
         // Default to true on first launch
         if UserDefaults.standard.object(forKey: "watermarkEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "watermarkEnabled")
         }
-        if UserDefaults.standard.object(forKey: "watermarkMode") == nil {
-            UserDefaults.standard.set("default", forKey: "watermarkMode")
+        // Migrate "default" mode to "library" with bundled watermark
+        let currentWMMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "default"
+        if currentWMMode == "default" || UserDefaults.standard.object(forKey: "watermarkMode") == nil {
+            UserDefaults.standard.set("library", forKey: "watermarkMode")
+            if UserDefaults.standard.string(forKey: "watermarkLibraryFile") == nil {
+                UserDefaults.standard.set(bundledWatermarkName, forKey: "watermarkLibraryFile")
+            }
         }
         watermarkCheckbox.state = UserDefaults.standard.bool(forKey: "watermarkEnabled") ? .on : .off
         self.watermarkCheckbox = watermarkCheckbox
 
+        let watermarkPopup = NSPopUpButton(frame: NSRect(x: 410, y: 313, width: 165, height: 26))
+        watermarkPopup.target = self
+        watermarkPopup.action = #selector(watermarkPopupChanged(_:))
+        self.watermarkPopup = watermarkPopup
+        populateWatermarkPopup()
+
+        // Check if watermark already selected and set initial states
+        let wmEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
+        let wmMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "library"
+        if wmMode == "library" {
+            if let savedWM = UserDefaults.standard.string(forKey: "watermarkLibraryFile") {
+                let wmPath = getWatermarkDirectoryURL().appendingPathComponent(savedWM).path
+                if FileManager.default.fileExists(atPath: wmPath) {
+                    selectWatermarkInPopup(savedWM)
+                }
+            }
+            watermarkPopup.isEnabled = wmEnabled
+        } else {
+            watermarkPopup.isEnabled = false
+        }
+
         // LUT checkbox and popup
         let lutCheckbox = NSButton(checkboxWithTitle: "Apply LUT", target: self, action: #selector(lutCheckboxChanged(_:)))
-        lutCheckbox.frame = NSRect(x: 345, y: 286, width: 90, height: 20)
+        lutCheckbox.frame = NSRect(x: 270, y: 286, width: 90, height: 20)
         self.lutCheckbox = lutCheckbox
 
-        let lutPopup = NSPopUpButton(frame: NSRect(x: 435, y: 283, width: 120, height: 26))
+        let lutPopup = NSPopUpButton(frame: NSRect(x: 360, y: 283, width: 215, height: 26))
         lutPopup.target = self
         lutPopup.action = #selector(lutPopupChanged(_:))
         self.lutPopup = lutPopup
@@ -437,7 +464,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // LUT filename label (below LUT row)
         let lutLabel = NSTextField(labelWithString: "")
-        lutLabel.frame = NSRect(x: 345, y: 260, width: 210, height: 16)
+        lutLabel.frame = NSRect(x: 270, y: 260, width: 305, height: 16)
         lutLabel.font = NSFont.systemFont(ofSize: 11)
         lutLabel.textColor = NSColor.secondaryLabelColor
         self.lutLabel = lutLabel
@@ -465,6 +492,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         contentView.addSubview(codecLabel)
         contentView.addSubview(codecPopup)
         contentView.addSubview(watermarkCheckbox)
+        contentView.addSubview(watermarkPopup)
         contentView.addSubview(lutCheckbox)
         contentView.addSubview(lutPopup)
         contentView.addSubview(lutLabel)
@@ -477,7 +505,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Apply colors after all views are added
         updateCodecPopup()
-        updateModeButtons()
+        updateModePopup()
         window.makeKeyAndOrderFront(nil)
         updateWindowColors()
 
@@ -622,12 +650,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         UserDefaults.standard.set(selectedCodecIndex, forKey: "selectedCodecIndex_\(selectedFormat)")
     }
 
-    @objc func modeButtonClicked(_ sender: NSButton) {
-        selectedMode = sender.tag
+    @objc func modePopupChanged(_ sender: NSPopUpButton) {
+        selectedMode = sender.indexOfSelectedItem
         self.currentMode = selectedMode == 1 ? .night : (selectedMode == 2 ? .auto : .day)
         UserDefaults.standard.set(selectedMode, forKey: "selectedModeSegment")
 
-        updateModeButtons()
         updateWindowColors()
         updateSettingsWindowColors()
         updateLUTManagementWindowColors()
@@ -637,6 +664,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     @objc func watermarkCheckboxChanged(_ sender: NSButton) {
         let isEnabled = (sender.state == .on)
         UserDefaults.standard.set(isEnabled, forKey: "watermarkEnabled")
+        updateWatermarkPopupState()
     }
 
     private func setEncodingPath(_ prefix: String, url: URL) {
@@ -802,22 +830,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
     }
     
-    private func updateModeButtons() {
-        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-        let selectedColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
-        let selectedTextColor = isDark ? NSColor.black : NSColor(white: 1.0, alpha: 0.8)
-        for (index, btn) in modeButtons.enumerated() {
-            if index == selectedMode {
-                btn.bezelColor = selectedColor
-                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: selectedTextColor]
-                btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
-            } else {
-                btn.bezelColor = isDark ? NSColor.darkGray : NSColor(calibratedWhite: 0.75, alpha: 1.0)
-                let textColor = isDark ? NSColor.lightGray : NSColor(white: 0.0, alpha: 0.8)
-                let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
-                btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
-            }
-        }
+    private func updateModePopup() {
+        modePopup?.selectItem(at: selectedMode)
     }
 
     private func getLUTDirectoryURL() -> URL {
@@ -885,7 +899,102 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             .map { $0.lastPathComponent }
             .sorted()
     }
-    
+
+    private let bundledWatermarkName = "MXF2Prxy.png"
+
+    private func getWatermarkDirectoryURL() -> URL {
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let wmDir = appSupport.appendingPathComponent("MXF2Prxy").appendingPathComponent("Watermarks")
+
+        if !fileManager.fileExists(atPath: wmDir.path) {
+            try? fileManager.createDirectory(at: wmDir, withIntermediateDirectories: true)
+        }
+
+        // Ensure bundled watermark is always present in the library
+        let bundledDest = wmDir.appendingPathComponent(bundledWatermarkName)
+        if !fileManager.fileExists(atPath: bundledDest.path) {
+            if let bundledURL = Bundle.main.resourceURL?.appendingPathComponent("watermark.png") {
+                try? fileManager.copyItem(at: bundledURL, to: bundledDest)
+            }
+        }
+
+        return wmDir
+    }
+
+    private func getAvailableWatermarks() -> [String] {
+        let wmDir = getWatermarkDirectoryURL()
+        let fileManager = FileManager.default
+        let imageExtensions = ["png", "jpg", "jpeg", "tiff", "bmp"]
+
+        guard let files = try? fileManager.contentsOfDirectory(at: wmDir, includingPropertiesForKeys: nil) else {
+            return [bundledWatermarkName]
+        }
+
+        let allFiles = files.filter { imageExtensions.contains($0.pathExtension.lowercased()) }
+            .map { $0.lastPathComponent }
+            .sorted()
+
+        // Pin bundled watermark at the top
+        var result = allFiles.filter { $0 == bundledWatermarkName }
+        result += allFiles.filter { $0 != bundledWatermarkName }
+        return result
+    }
+
+    private func populateWatermarkPopup() {
+        guard let popup = watermarkPopup else { return }
+        popup.removeAllItems()
+
+        let watermarks = getAvailableWatermarks()
+
+        if watermarks.isEmpty {
+            popup.addItem(withTitle: "No watermarks")
+        } else {
+            popup.addItems(withTitles: watermarks)
+        }
+
+        popup.menu?.addItem(NSMenuItem.separator())
+        popup.addItem(withTitle: "Add Watermark...")
+    }
+
+    private func selectWatermarkInPopup(_ wmName: String) {
+        guard let popup = watermarkPopup else { return }
+        if let index = popup.itemTitles.firstIndex(of: wmName) {
+            popup.selectItem(at: index)
+        }
+    }
+
+    @objc func watermarkPopupChanged(_ sender: NSPopUpButton) {
+        guard let selectedTitle = sender.titleOfSelectedItem else { return }
+        if selectedTitle == "Add Watermark..." {
+            selectWatermarkFile()
+            if let savedWM = UserDefaults.standard.string(forKey: "watermarkLibraryFile") {
+                selectWatermarkInPopup(savedWM)
+            } else {
+                sender.selectItem(at: 0)
+            }
+        } else if selectedTitle != "No watermarks" {
+            UserDefaults.standard.set(selectedTitle, forKey: "watermarkLibraryFile")
+            UserDefaults.standard.set("library", forKey: "watermarkMode")
+            UserDefaults.standard.set(true, forKey: "watermarkEnabled")
+            watermarkCheckbox?.state = .on
+            watermarkPopup?.isEnabled = true
+        }
+    }
+
+    private func updateWatermarkPopupState() {
+        let watermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "library"
+        let isLibrary = watermarkMode != "custom"
+        let isEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
+        watermarkPopup?.isEnabled = isEnabled && isLibrary
+
+        if isEnabled && isLibrary {
+            if let savedWM = UserDefaults.standard.string(forKey: "watermarkLibraryFile") {
+                selectWatermarkInPopup(savedWM)
+            }
+        }
+    }
+
     private func updateWindowColors() {
         let mode = currentMode
         let isDark: Bool
@@ -1012,7 +1121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
 
         // Update mode buttons to reflect selection
-        updateModeButtons()
+        updateModePopup()
     }
 
     private func updateLUTManagementWindowColors() {
@@ -1093,14 +1202,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         contentView.layer?.backgroundColor = bgColor.cgColor
         CATransaction.commit()
 
-        // Update all labels and buttons
+        // Update all labels, buttons, and scroll view
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+        let listBgColor = isDark ? NSColor.black : NSColor(red: 0.65, green: 0.65, blue: 0.65, alpha: 1.0)
         for subview in contentView.subviews {
             if let label = subview as? NSTextField, !label.isEditable {
                 label.textColor = textColor
             } else if let button = subview as? NSButton {
                 let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
                 button.attributedTitle = NSAttributedString(string: button.title, attributes: attrs)
+            } else if let scrollView = subview as? NSScrollView {
+                scrollView.backgroundColor = listBgColor
+                if let listView = scrollView.documentView {
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    listView.layer?.backgroundColor = listBgColor.cgColor
+                    CATransaction.commit()
+                    for rowView in listView.subviews {
+                        for item in rowView.subviews {
+                            if let label = item as? NSTextField {
+                                label.textColor = textColor
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1296,17 +1421,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             }
         }
 
-        // Find watermark in Resources
-        let watermarkURL = Bundle.main.resourceURL?.appendingPathComponent("watermark.png")
+        // Resolve watermark image path based on mode
         let watermarkEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
-        let watermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "default"
+        let watermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "library"
         let customWatermarkText = UserDefaults.standard.string(forKey: "watermarkCustomText") ?? ""
-        let hasDefaultWatermark = watermarkEnabled && watermarkMode == "default" && watermarkURL != nil && FileManager.default.fileExists(atPath: watermarkURL?.path ?? "")
+        let libraryWatermarkFile = UserDefaults.standard.string(forKey: "watermarkLibraryFile") ?? ""
+
+        let watermarkURL: URL?
+        if watermarkMode != "custom" && !libraryWatermarkFile.isEmpty {
+            let libraryPath = getWatermarkDirectoryURL().appendingPathComponent(libraryWatermarkFile)
+            watermarkURL = FileManager.default.fileExists(atPath: libraryPath.path) ? libraryPath : nil
+        } else {
+            watermarkURL = nil
+        }
+
+        let hasImageWatermark = watermarkEnabled && watermarkMode != "custom" && watermarkURL != nil
         let hasCustomTextWatermark = watermarkEnabled && watermarkMode == "custom" && !customWatermarkText.isEmpty
-        let hasWatermark = hasDefaultWatermark || hasCustomTextWatermark
+        let hasWatermark = hasImageWatermark || hasCustomTextWatermark
 
         // Debug log watermark settings
-        appendLog(logURL: logURL, entry: "Watermark settings: enabled=\(watermarkEnabled), mode=\(watermarkMode), customText='\(customWatermarkText)', hasDefault=\(hasDefaultWatermark), hasCustomText=\(hasCustomTextWatermark)\n")
+        appendLog(logURL: logURL, entry: "Watermark settings: enabled=\(watermarkEnabled), mode=\(watermarkMode), customText='\(customWatermarkText)', libraryFile='\(libraryWatermarkFile)', hasImage=\(hasImageWatermark), hasCustomText=\(hasCustomTextWatermark)\n")
 
         // Escape text for ffmpeg drawtext filter (for Process, not shell)
         // Only need single backslash escapes when not going through a shell
@@ -1435,7 +1569,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         
                         // Step 2: Apply LUT and/or watermark to AVFoundation intermediate
                         var args: [String]
-                        if hasDefaultWatermark {
+                        if hasImageWatermark {
                             // Build filter chain with optional LUT and image watermark
                             var filterChain = "[0:v]"
                             if hasLUT {
@@ -1550,9 +1684,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 var videoFilterArgs: [String]
                 var videoMapArgs: [String]
 
-                self.appendLog(logURL: logURL, entry: "MXF->QT: Watermark check: hasDefaultWatermark=\(hasDefaultWatermark), hasCustomTextWatermark=\(hasCustomTextWatermark), escapedCustomText='\(escapedCustomText)'\n")
+                self.appendLog(logURL: logURL, entry: "MXF->QT: Watermark check: hasImageWatermark=\(hasImageWatermark), hasCustomTextWatermark=\(hasCustomTextWatermark), escapedCustomText='\(escapedCustomText)'\n")
 
-                if hasDefaultWatermark {
+                if hasImageWatermark {
                     // Add watermark input
                     args += ["-i", watermarkURL!.path]
 
@@ -1628,7 +1762,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             var videoFilterArgs: [String]
             var videoMapArgs: [String]
 
-            if hasDefaultWatermark {
+            if hasImageWatermark {
                 args += ["-i", watermarkURL!.path]
                 var filterChain = "[0:v]"
                 if hasLUT {
@@ -1694,7 +1828,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             var videoFilterArgs: [String]
             var videoMapArgs: [String]
 
-            if hasDefaultWatermark {
+            if hasImageWatermark {
                 // Add watermark input
                 args1 += ["-i", watermarkURL!.path]
 
@@ -2052,7 +2186,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
             // Open Folder button
             let openFolderButton = NSButton(frame: NSRect(x: 150, y: 40, width: 140, height: 28))
-            openFolderButton.title = "Open in Finder"
+            openFolderButton.title = "Show in Finder"
             openFolderButton.bezelStyle = .rounded
             openFolderButton.target = self
             openFolderButton.action = #selector(openLUTFolder)
@@ -2203,9 +2337,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     @objc func showWatermarkManagement() {
         if watermarkManagementWindow == nil {
             guard let mainWindow = window else { return }
-            let windowSize = NSSize(width: 400, height: 220)
+            let windowSize = NSSize(width: 500, height: 480)
             let mainOrigin = mainWindow.frame.origin
-            let windowOrigin = NSPoint(x: mainOrigin.x + 100, y: mainOrigin.y + 100)
+            let windowOrigin = NSPoint(x: mainOrigin.x + 100, y: mainOrigin.y + 50)
 
             let wmWin = NSWindow(
                 contentRect: NSRect(origin: windowOrigin, size: windowSize),
@@ -2238,31 +2372,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             contentView.layer?.backgroundColor = (isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)).cgColor
 
             let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+            let buttonTextColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(white: 0.2, alpha: 1.0)
 
             // Title label
-            let titleLabel = NSTextField(labelWithString: "Watermark Type")
-            titleLabel.frame = NSRect(x: 20, y: 175, width: 200, height: 24)
+            let titleLabel = NSTextField(labelWithString: "Watermark Settings")
+            titleLabel.frame = NSRect(x: 20, y: 440, width: 300, height: 24)
             titleLabel.font = NSFont.boldSystemFont(ofSize: 16)
             titleLabel.textColor = textColor
             contentView.addSubview(titleLabel)
 
             // Load current mode from UserDefaults
-            let currentWatermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "default"
+            let currentWatermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "library"
             let currentCustomText = UserDefaults.standard.string(forKey: "watermarkCustomText") ?? ""
-
-            // Radio button: Default watermark
-            let defaultRadio = NSButton(radioButtonWithTitle: "Default watermark (image)", target: self, action: #selector(watermarkRadioClicked(_:)))
-            defaultRadio.frame = NSRect(x: 20, y: 140, width: 300, height: 20)
-            defaultRadio.tag = 0
-            defaultRadio.identifier = NSUserInterfaceItemIdentifier("defaultRadio")
-            defaultRadio.state = (currentWatermarkMode == "default") ? .on : .off
-            let defaultAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
-            defaultRadio.attributedTitle = NSAttributedString(string: defaultRadio.title, attributes: defaultAttrs)
-            contentView.addSubview(defaultRadio)
+            let currentLibraryFile = UserDefaults.standard.string(forKey: "watermarkLibraryFile") ?? ""
 
             // Radio button: Custom text
             let customRadio = NSButton(radioButtonWithTitle: "Custom text", target: self, action: #selector(watermarkRadioClicked(_:)))
-            customRadio.frame = NSRect(x: 20, y: 110, width: 150, height: 20)
+            customRadio.frame = NSRect(x: 20, y: 410, width: 150, height: 20)
             customRadio.tag = 1
             customRadio.identifier = NSUserInterfaceItemIdentifier("customRadio")
             customRadio.state = (currentWatermarkMode == "custom") ? .on : .off
@@ -2271,7 +2397,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             contentView.addSubview(customRadio)
 
             // Text field for custom text
-            let textField = NSTextField(frame: NSRect(x: 20, y: 75, width: 360, height: 24))
+            let textField = NSTextField(frame: NSRect(x: 40, y: 380, width: 340, height: 24))
             textField.stringValue = currentCustomText
             textField.placeholderString = "Enter custom watermark text (max 48 characters)"
             textField.isEnabled = (currentWatermarkMode == "custom")
@@ -2282,31 +2408,155 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
             // Max length hint
             let maxLenLabel = NSTextField(labelWithString: "(48 characters max.)")
-            maxLenLabel.frame = NSRect(x: 240, y: 50, width: 140, height: 16)
+            maxLenLabel.frame = NSRect(x: 240, y: 358, width: 140, height: 16)
             maxLenLabel.font = NSFont.systemFont(ofSize: 11)
             maxLenLabel.textColor = NSColor.secondaryLabelColor
             maxLenLabel.alignment = .right
             contentView.addSubview(maxLenLabel)
 
-            // Cancel button
-            let cancelButton = NSButton(frame: NSRect(x: 100, y: 15, width: 90, height: 28))
-            cancelButton.title = "Cancel"
-            cancelButton.bezelStyle = .rounded
-            cancelButton.target = self
-            cancelButton.action = #selector(cancelWatermarkManagement)
-            let cancelAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
-            cancelButton.attributedTitle = NSAttributedString(string: cancelButton.title, attributes: cancelAttrs)
-            contentView.addSubview(cancelButton)
+            // Radio button: Library image
+            let libraryRadio = NSButton(radioButtonWithTitle: "Library image", target: self, action: #selector(watermarkRadioClicked(_:)))
+            libraryRadio.frame = NSRect(x: 20, y: 328, width: 150, height: 20)
+            libraryRadio.tag = 2
+            libraryRadio.identifier = NSUserInterfaceItemIdentifier("libraryRadio")
+            libraryRadio.state = (currentWatermarkMode == "custom") ? .off : .on
+            let libraryAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
+            libraryRadio.attributedTitle = NSAttributedString(string: libraryRadio.title, attributes: libraryAttrs)
+            contentView.addSubview(libraryRadio)
 
-            // Save button
-            let saveButton = NSButton(frame: NSRect(x: 210, y: 15, width: 90, height: 28))
-            saveButton.title = "Save"
-            saveButton.bezelStyle = .rounded
-            saveButton.target = self
-            saveButton.action = #selector(saveWatermarkManagement)
-            let saveAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
-            saveButton.attributedTitle = NSAttributedString(string: saveButton.title, attributes: saveAttrs)
-            contentView.addSubview(saveButton)
+            // Scroll view for watermark library list
+            let scrollView = NSScrollView(frame: NSRect(x: 20, y: 90, width: 460, height: 200))
+            scrollView.hasVerticalScroller = true
+            scrollView.autohidesScrollers = true
+            scrollView.borderType = .lineBorder
+            scrollView.identifier = NSUserInterfaceItemIdentifier("watermarkScrollView")
+
+            let listBgColor = isDark ? NSColor.black : NSColor(red: 0.65, green: 0.65, blue: 0.65, alpha: 1.0)
+            scrollView.backgroundColor = listBgColor
+
+            let listView = FlippedView(frame: NSRect(x: 0, y: 0, width: 440, height: 200))
+            listView.wantsLayer = true
+            listView.layer?.backgroundColor = listBgColor.cgColor
+
+            let watermarks = getAvailableWatermarks()
+            var yPos: CGFloat = 0
+
+            for (index, wmName) in watermarks.enumerated() {
+                let rowView = NSView(frame: NSRect(x: 0, y: yPos, width: 440, height: 30))
+
+                // Clickable name label — clicking selects the watermark
+                let nameButton = NSButton(frame: NSRect(x: 10, y: 2, width: 340, height: 24))
+                nameButton.title = wmName
+                nameButton.alignment = .left
+                nameButton.bezelStyle = .inline
+                nameButton.isBordered = false
+                let isSelected = wmName == currentLibraryFile
+                let nameColor: NSColor = isSelected
+                    ? (isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0))
+                    : (isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0))
+                nameButton.font = NSFont.systemFont(ofSize: 12)
+                let nameAttrs: [NSAttributedString.Key: Any] = [
+                    .foregroundColor: nameColor,
+                    .font: NSFont.systemFont(ofSize: 12)
+                ]
+                nameButton.attributedTitle = NSAttributedString(string: wmName, attributes: nameAttrs)
+                nameButton.target = self
+                nameButton.action = #selector(selectWatermarkFromList(_:))
+                nameButton.identifier = NSUserInterfaceItemIdentifier(wmName)
+                nameButton.tag = index
+                rowView.addSubview(nameButton)
+
+                // Only show rename/delete for user-added watermarks (not the bundled one)
+                if wmName != bundledWatermarkName {
+                    // Rename button (pencil icon)
+                    let renameButton = NSButton(frame: NSRect(x: 360, y: 2, width: 30, height: 24))
+                    if #available(macOS 11.0, *) {
+                        if let pencilImage = NSImage(systemSymbolName: "pencil", accessibilityDescription: "Rename") {
+                            renameButton.image = pencilImage
+                            renameButton.imageScaling = .scaleProportionallyDown
+                        } else {
+                            renameButton.title = "Rn"
+                        }
+                    } else {
+                        renameButton.title = "Rn"
+                    }
+                    renameButton.bezelStyle = .regularSquare
+                    renameButton.isBordered = true
+                    renameButton.tag = index
+                    renameButton.target = self
+                    renameButton.action = #selector(renameWatermark(_:))
+                    renameButton.identifier = NSUserInterfaceItemIdentifier(wmName)
+                    renameButton.toolTip = "Rename watermark"
+                    rowView.addSubview(renameButton)
+
+                    // Delete button (trash icon)
+                    let deleteButton = NSButton(frame: NSRect(x: 395, y: 2, width: 30, height: 24))
+                    if #available(macOS 11.0, *) {
+                        if let trashImage = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete") {
+                            deleteButton.image = trashImage
+                            deleteButton.imageScaling = .scaleProportionallyDown
+                        } else {
+                            deleteButton.title = "Del"
+                        }
+                    } else {
+                        deleteButton.title = "Del"
+                    }
+                    deleteButton.bezelStyle = .regularSquare
+                    deleteButton.isBordered = true
+                    deleteButton.tag = index
+                    deleteButton.target = self
+                    deleteButton.action = #selector(deleteWatermark(_:))
+                    deleteButton.identifier = NSUserInterfaceItemIdentifier(wmName)
+                    deleteButton.toolTip = "Delete watermark"
+                    rowView.addSubview(deleteButton)
+                }
+
+                listView.addSubview(rowView)
+                yPos += 30
+            }
+
+            if watermarks.count * 30 > 200 {
+                listView.frame = NSRect(x: 0, y: 0, width: 440, height: CGFloat(watermarks.count * 30))
+            }
+
+            scrollView.documentView = listView
+            contentView.addSubview(scrollView)
+
+            // Add Watermark button
+            let addButton = NSButton(frame: NSRect(x: 20, y: 52, width: 150, height: 28))
+            addButton.title = "Add Watermark..."
+            addButton.bezelStyle = .rounded
+            addButton.target = self
+            addButton.action = #selector(selectWatermarkFile)
+            if #available(macOS 10.14, *) {
+                addButton.contentTintColor = buttonTextColor
+            }
+            let addAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: buttonTextColor]
+            addButton.attributedTitle = NSAttributedString(string: addButton.title, attributes: addAttrs)
+            contentView.addSubview(addButton)
+
+            // Show in Finder button
+            let openFolderButton = NSButton(frame: NSRect(x: 180, y: 52, width: 140, height: 28))
+            openFolderButton.title = "Show in Finder"
+            openFolderButton.bezelStyle = .rounded
+            openFolderButton.target = self
+            openFolderButton.action = #selector(openWatermarkFolder)
+            if #available(macOS 10.14, *) {
+                openFolderButton.contentTintColor = buttonTextColor
+            }
+            let openAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: buttonTextColor]
+            openFolderButton.attributedTitle = NSAttributedString(string: openFolderButton.title, attributes: openAttrs)
+            contentView.addSubview(openFolderButton)
+
+            // Close button
+            let closeButton = NSButton(frame: NSRect(x: 370, y: 15, width: 90, height: 28))
+            closeButton.title = "Close"
+            closeButton.bezelStyle = .rounded
+            closeButton.target = self
+            closeButton.action = #selector(closeWatermarkManagement)
+            let closeAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: buttonTextColor]
+            closeButton.attributedTitle = NSAttributedString(string: closeButton.title, attributes: closeAttrs)
+            contentView.addSubview(closeButton)
 
             wmWin.contentView = contentView
             wmWin.delegate = self
@@ -2317,9 +2567,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func refreshWatermarkManagementWindow() {
+        guard let wmWin = watermarkManagementWindow else { return }
+        let savedFrame = wmWin.frame
+        // Close existing window and rebuild
+        wmWin.orderOut(nil)
+        watermarkManagementWindow = nil
+        showWatermarkManagement()
+        watermarkManagementWindow?.setFrame(savedFrame, display: true)
+    }
+
+    @objc private func selectWatermarkFromList(_ sender: NSButton) {
+        guard let wmName = sender.identifier?.rawValue else { return }
+        UserDefaults.standard.set(wmName, forKey: "watermarkLibraryFile")
+        UserDefaults.standard.set("library", forKey: "watermarkMode")
+        populateWatermarkPopup()
+        selectWatermarkInPopup(wmName)
+        updateWatermarkPopupState()
+        refreshWatermarkManagementWindow()
+    }
+
     @objc private func watermarkRadioClicked(_ sender: NSButton) {
-        // Just update UI - enable/disable text field based on selection
         let isCustom = sender.tag == 1
+        UserDefaults.standard.set(isCustom ? "custom" : "library", forKey: "watermarkMode")
+        updateWatermarkPopupState()
         if let contentView = watermarkManagementWindow?.contentView {
             for subview in contentView.subviews {
                 if let textField = subview as? NSTextField,
@@ -2331,46 +2602,163 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
 
     @objc private func watermarkTextFieldChanged(_ sender: NSTextField) {
-        // Enforce 48 character limit on commit
         if sender.stringValue.count > 48 {
             sender.stringValue = String(sender.stringValue.prefix(48))
         }
+        UserDefaults.standard.set(sender.stringValue, forKey: "watermarkCustomText")
     }
 
-    @objc private func saveWatermarkManagement() {
-        guard let contentView = watermarkManagementWindow?.contentView else { return }
+    @objc private func closeWatermarkManagement() {
+        watermarkManagementWindow?.orderOut(nil)
+        watermarkManagementWindow = nil
+    }
 
-        // Find which radio is selected
-        var mode = "default"
-        var customText = ""
+    @objc func selectWatermarkFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedFileTypes = ["png", "jpg", "jpeg", "tiff", "bmp"]
+        panel.message = "Select a watermark image file"
 
-        for subview in contentView.subviews {
-            if let radio = subview as? NSButton,
-               radio.identifier?.rawValue == "customRadio",
-               radio.state == .on {
-                mode = "custom"
+        panel.begin { [weak self] response in
+            guard let self = self, response == .OK, let url = panel.url else { return }
+
+            let wmDir = self.getWatermarkDirectoryURL()
+            let destURL = wmDir.appendingPathComponent(url.lastPathComponent)
+            let fileManager = FileManager.default
+
+            do {
+                if fileManager.fileExists(atPath: destURL.path) {
+                    try fileManager.removeItem(at: destURL)
+                }
+                try fileManager.copyItem(at: url, to: destURL)
+                UserDefaults.standard.set(url.lastPathComponent, forKey: "watermarkLibraryFile")
+                UserDefaults.standard.set("library", forKey: "watermarkMode")
+                UserDefaults.standard.set(true, forKey: "watermarkEnabled")
+                self.watermarkCheckbox?.state = .on
+
+                // Refresh watermark popup and select the new watermark
+                self.populateWatermarkPopup()
+                self.selectWatermarkInPopup(url.lastPathComponent)
+                self.updateWatermarkPopupState()
+
+                // Refresh watermark management window if it's open
+                if self.watermarkManagementWindow != nil {
+                    self.refreshWatermarkManagementWindow()
+                }
+            } catch {
+                let errorAlert = NSAlert()
+                errorAlert.messageText = "Error"
+                errorAlert.informativeText = "Failed to import watermark: \(error.localizedDescription)"
+                errorAlert.alertStyle = .critical
+                errorAlert.runModal()
             }
-            if let textField = subview as? NSTextField,
-               textField.identifier?.rawValue == "watermarkTextField" {
-                customText = textField.stringValue
-                if customText.count > 48 {
-                    customText = String(customText.prefix(48))
+        }
+    }
+
+    @objc private func deleteWatermark(_ sender: NSButton) {
+        guard let wmName = sender.identifier?.rawValue else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Delete Watermark"
+        alert.informativeText = "Are you sure you want to delete '\(wmName)'?"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+
+        alert.beginSheetModal(for: watermarkManagementWindow!) { response in
+            if response == .alertFirstButtonReturn {
+                let wmDir = self.getWatermarkDirectoryURL()
+                let wmURL = wmDir.appendingPathComponent(wmName)
+
+                do {
+                    try FileManager.default.removeItem(at: wmURL)
+
+                    if UserDefaults.standard.string(forKey: "watermarkLibraryFile") == wmName {
+                        UserDefaults.standard.removeObject(forKey: "watermarkLibraryFile")
+                        UserDefaults.standard.set("library", forKey: "watermarkMode")
+                    }
+
+                    self.populateWatermarkPopup()
+                    self.updateWatermarkPopupState()
+                    self.refreshWatermarkManagementWindow()
+                } catch {
+                    let errorAlert = NSAlert()
+                    errorAlert.messageText = "Error"
+                    errorAlert.informativeText = "Failed to delete watermark: \(error.localizedDescription)"
+                    errorAlert.alertStyle = .critical
+                    errorAlert.runModal()
                 }
             }
         }
-
-        // Save to UserDefaults
-        UserDefaults.standard.set(mode, forKey: "watermarkMode")
-        UserDefaults.standard.set(customText, forKey: "watermarkCustomText")
-
-        watermarkManagementWindow?.orderOut(nil)
-        watermarkManagementWindow = nil
     }
 
-    @objc private func cancelWatermarkManagement() {
-        // Just close without saving
-        watermarkManagementWindow?.orderOut(nil)
-        watermarkManagementWindow = nil
+    @objc private func renameWatermark(_ sender: NSButton) {
+        guard let oldName = sender.identifier?.rawValue else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Rename Watermark"
+        alert.informativeText = "Enter a new name for '\(oldName)':"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+
+        let ext = (oldName as NSString).pathExtension
+        let nameWithoutExt = (oldName as NSString).deletingPathExtension
+
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        textField.stringValue = nameWithoutExt
+        alert.accessoryView = textField
+        alert.window.initialFirstResponder = textField
+
+        alert.beginSheetModal(for: watermarkManagementWindow!) { response in
+            if response == .alertFirstButtonReturn {
+                var newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
+
+                if !newName.hasSuffix(".\(ext)") {
+                    newName += ".\(ext)"
+                }
+
+                guard !newName.isEmpty && newName != oldName else { return }
+
+                let wmDir = self.getWatermarkDirectoryURL()
+                let oldURL = wmDir.appendingPathComponent(oldName)
+                let newURL = wmDir.appendingPathComponent(newName)
+
+                if FileManager.default.fileExists(atPath: newURL.path) {
+                    let errorAlert = NSAlert()
+                    errorAlert.messageText = "Error"
+                    errorAlert.informativeText = "A watermark with the name '\(newName)' already exists."
+                    errorAlert.alertStyle = .critical
+                    errorAlert.runModal()
+                    return
+                }
+
+                do {
+                    try FileManager.default.moveItem(at: oldURL, to: newURL)
+
+                    if UserDefaults.standard.string(forKey: "watermarkLibraryFile") == oldName {
+                        UserDefaults.standard.set(newName, forKey: "watermarkLibraryFile")
+                    }
+
+                    self.populateWatermarkPopup()
+                    self.updateWatermarkPopupState()
+                    self.refreshWatermarkManagementWindow()
+                } catch {
+                    let errorAlert = NSAlert()
+                    errorAlert.messageText = "Error"
+                    errorAlert.informativeText = "Failed to rename watermark: \(error.localizedDescription)"
+                    errorAlert.alertStyle = .critical
+                    errorAlert.runModal()
+                }
+            }
+        }
+    }
+
+    @objc private func openWatermarkFolder() {
+        let wmDir = getWatermarkDirectoryURL()
+        NSWorkspace.shared.activateFileViewerSelecting([wmDir])
     }
 
     func setupMenuBar() {
@@ -2439,7 +2827,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             let mainLabelColor = formatLabel?.textColor ?? NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
 
             let watermarkButton = NSButton(frame: NSRect(x: 100, y: 220, width: 200, height: 28))
-            watermarkButton.title = "Manage watermark"
+            watermarkButton.title = "Manage Watermarks"
             watermarkButton.bezelStyle = .rounded
             watermarkButton.target = self
             watermarkButton.action = #selector(showWatermarkManagement)
@@ -2455,29 +2843,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             let lutButtonAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: mainLabelColor]
             lutButton.attributedTitle = NSAttributedString(string: lutButton.title, attributes: lutButtonAttrs)
 
-            let modeLabel = NSTextField(labelWithString: "Display Mode:")
-            modeLabel.frame = NSRect(x: 50, y: 130, width: 150, height: 20)
+            let modeLabel = NSTextField(labelWithString: "Mode")
+            modeLabel.frame = NSRect(x: 50, y: 133, width: 40, height: 20)
             // Use the same color as the main window's Output label
             modeLabel.textColor = mainLabelColor
 
-            // Create mode buttons for settings window
-            let modeTitles = ["Light", "Dark", "Auto"]
-            var xPos: CGFloat = 50
-            modeButtons.removeAll()
-            for (index, title) in modeTitles.enumerated() {
-                let btn = NSButton(frame: NSRect(x: xPos, y: 90, width: 90, height: 28))
-                btn.title = title
-                btn.bezelStyle = .rounded
-                btn.tag = index
-                btn.target = self
-                btn.action = #selector(modeButtonClicked(_:))
-                // Set button text color to match main window's Output label color
-                let btnAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: mainLabelColor]
-                btn.attributedTitle = NSAttributedString(string: btn.title, attributes: btnAttrs)
-                modeButtons.append(btn)
-                xPos += 100
-            }
-            updateModeButtons()
+            // Create mode popup for settings window
+            let modePopup = NSPopUpButton(frame: NSRect(x: 95, y: 130, width: 120, height: 26))
+            modePopup.addItems(withTitles: ["Light", "Dark", "Auto"])
+            modePopup.selectItem(at: selectedMode)
+            modePopup.target = self
+            modePopup.action = #selector(modePopupChanged(_:))
+            self.modePopup = modePopup
 
             let contentView = NSView()
             contentView.wantsLayer = true
@@ -2491,9 +2868,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             contentView.addSubview(watermarkButton)
             contentView.addSubview(lutButton)
             contentView.addSubview(modeLabel)
-            for btn in modeButtons {
-                contentView.addSubview(btn)
-            }
+            contentView.addSubview(modePopup)
 
             let closeButton = NSButton(frame: NSRect(x: 150, y: 20, width: 100, height: 30))
             closeButton.title = "Close"
