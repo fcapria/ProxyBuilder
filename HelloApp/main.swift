@@ -1408,6 +1408,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Get video dimensions using ffmpeg (AVFoundation can't read MXF)
         var videoWidth: Int = 0
+        var videoHeight: Int = 0
         if let ffmpegPath = ffmpegURL?.path {
             let probe = Process()
             probe.executableURL = URL(fileURLWithPath: ffmpegPath)
@@ -1421,12 +1422,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 let pattern = #"(\d{3,5})x(\d{3,5})"#
                 if let regex = try? NSRegularExpression(pattern: pattern),
                    let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-                   let widthRange = Range(match.range(at: 1), in: output) {
+                   let widthRange = Range(match.range(at: 1), in: output),
+                   let heightRange = Range(match.range(at: 2), in: output) {
                     videoWidth = Int(output[widthRange]) ?? 0
+                    videoHeight = Int(output[heightRange]) ?? 0
                 }
             }
         }
-        appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth)\n")
+        let wmHeight = max(videoHeight * 15 / 100, 160)
+        let wmPadX = videoWidth * 5 / 100
+        let wmPadY = videoHeight * 5 / 100
+        appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth), height: \(videoHeight), wmHeight: \(wmHeight)\n")
 
         // Use software encoder for oversized videos (VideoToolbox max is ~4096 width)
         let useHardwareEncoder = videoWidth > 0 && videoWidth <= 4096
@@ -1514,7 +1520,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                             if hasLUT {
                                 filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                             }
-                            filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+                            filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]scale=-1:\(wmHeight),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                             args = [
                                 "-i", intermediateURL.path,
@@ -1634,7 +1640,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     if hasLUT {
                         filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
-                    filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+                    filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:\(wmHeight),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                     videoFilterArgs = ["-filter_complex", filterChain]
                     videoMapArgs = ["-map", "[v]"]
@@ -1707,7 +1713,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:\(wmHeight),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
             } else if hasCustomTextWatermark {
@@ -1776,7 +1782,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:160,format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-10:H-h-10[v]"
+                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:\(wmHeight),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
@@ -2710,8 +2716,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
         appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
-        
-        let quitItem = NSMenuItem(title: "Quit MXF2Prxy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let hideItem = NSMenuItem(title: "Hide MXF2PRXY", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(hideItem)
+
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+
+        let showAllItem = NSMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(showAllItem)
+
+        appMenu.addItem(NSMenuItem.separator())
+
+        let quitItem = NSMenuItem(title: "Quit MXF2PRXY", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenu.addItem(quitItem)
         
         let appMenuItem = NSMenuItem()
