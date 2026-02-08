@@ -23,6 +23,51 @@ HOMEBREW_FFMPEG=$(which ffmpeg 2>/dev/null || echo "")
 if [ -n "$HOMEBREW_FFMPEG" ] && [ -f "$HOMEBREW_FFMPEG" ]; then
     echo "Using Homebrew ffmpeg: $HOMEBREW_FFMPEG"
     cp "$HOMEBREW_FFMPEG" MXF2PRXY.app/Contents/MacOS/ffmpeg
+
+    # Bundle all shared libraries so the app is self-contained
+    LIBS_DIR="MXF2PRXY.app/Contents/Frameworks"
+    mkdir -p "$LIBS_DIR"
+    FFMPEG_BIN="MXF2PRXY.app/Contents/MacOS/ffmpeg"
+
+    # Copy non-system dylibs and rewrite paths
+    copy_and_rewrite_deps() {
+        local binary="$1"
+        otool -L "$binary" | awk '{print $1}' | tail -n +2 | while read -r lib; do
+            # Skip system libraries and self-references
+            case "$lib" in
+                /System/*|/usr/lib/*|@*) continue ;;
+            esac
+            local libname
+            libname=$(basename "$lib")
+            if [ ! -f "$LIBS_DIR/$libname" ]; then
+                echo "  Bundling: $libname"
+                cp "$lib" "$LIBS_DIR/$libname"
+                chmod 755 "$LIBS_DIR/$libname"
+                # Recursively handle dependencies of this library
+                copy_and_rewrite_deps "$LIBS_DIR/$libname"
+            fi
+            # Rewrite the reference in the binary
+            install_name_tool -change "$lib" "@executable_path/../Frameworks/$libname" "$binary" 2>/dev/null || true
+        done
+    }
+
+    echo "Bundling ffmpeg shared libraries..."
+    copy_and_rewrite_deps "$FFMPEG_BIN"
+
+    # Also rewrite id and deps inside each bundled dylib
+    for dylib in "$LIBS_DIR"/*.dylib; do
+        libname=$(basename "$dylib")
+        install_name_tool -id "@executable_path/../Frameworks/$libname" "$dylib" 2>/dev/null || true
+        otool -L "$dylib" | awk '{print $1}' | tail -n +2 | while read -r lib; do
+            case "$lib" in
+                /System/*|/usr/lib/*|@*) continue ;;
+            esac
+            local depname
+            depname=$(basename "$lib")
+            install_name_tool -change "$lib" "@executable_path/../Frameworks/$depname" "$dylib" 2>/dev/null || true
+        done
+    done
+    echo "Bundled $(ls "$LIBS_DIR"/*.dylib 2>/dev/null | wc -l | tr -d ' ') shared libraries"
 else
     echo "ERROR: Homebrew ffmpeg not found. Install with: brew install ffmpeg"
     exit 1
