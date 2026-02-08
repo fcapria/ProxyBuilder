@@ -1409,6 +1409,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Get video dimensions using ffmpeg (AVFoundation can't read MXF)
         var videoWidth: Int = 0
         var videoHeight: Int = 0
+        var darNum: Int = 0
+        var darDen: Int = 0
         if let ffmpegPath = ffmpegURL?.path {
             let probe = Process()
             probe.executableURL = URL(fileURLWithPath: ffmpegPath)
@@ -1427,12 +1429,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     videoWidth = Int(output[widthRange]) ?? 0
                     videoHeight = Int(output[heightRange]) ?? 0
                 }
+                // Parse DAR (e.g. "DAR 16:9")
+                let darPattern = #"DAR (\d+):(\d+)"#
+                if let darRegex = try? NSRegularExpression(pattern: darPattern),
+                   let darMatch = darRegex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
+                   let darNumRange = Range(darMatch.range(at: 1), in: output),
+                   let darDenRange = Range(darMatch.range(at: 2), in: output) {
+                    darNum = Int(output[darNumRange]) ?? 0
+                    darDen = Int(output[darDenRange]) ?? 0
+                }
             }
         }
         let wmHeight = max(videoHeight * 15 / 100, 160)
         let wmPadX = videoWidth * 5 / 100
         let wmPadY = videoHeight * 5 / 100
-        appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth), height: \(videoHeight), wmHeight: \(wmHeight)\n")
+        // Anamorphic correction: scale to target height preserving AR, then squeeze width
+        var wmScaleFilter = "scale=-1:\(wmHeight)"
+        if videoWidth > 0 && videoHeight > 0 && darNum > 0 && darDen > 0 {
+            let rasterAR = Double(videoWidth) / Double(videoHeight)
+            let dar = Double(darNum) / Double(darDen)
+            let squeeze = rasterAR / dar
+            if abs(squeeze - 1.0) > 0.01 {
+                wmScaleFilter = "scale=-1:\(wmHeight),scale=iw*\(squeeze):ih"
+            }
+        }
+        appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth), height: \(videoHeight), DAR: \(darNum):\(darDen), wmScaleFilter: \(wmScaleFilter), wmHeight: \(wmHeight)\n")
 
         // Use software encoder for oversized videos (VideoToolbox max is ~4096 width)
         let useHardwareEncoder = videoWidth > 0 && videoWidth <= 4096
@@ -1520,7 +1541,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                             if hasLUT {
                                 filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                             }
-                            filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]scale=-1:\(wmHeight),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                            filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                             args = [
                                 "-i", intermediateURL.path,
@@ -1640,7 +1661,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     if hasLUT {
                         filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
-                    filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:\(wmHeight),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                    filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                     videoFilterArgs = ["-filter_complex", filterChain]
                     videoMapArgs = ["-map", "[v]"]
@@ -1713,7 +1734,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:\(wmHeight),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
             } else if hasCustomTextWatermark {
@@ -1782,7 +1803,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]scale=-1:\(wmHeight),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
