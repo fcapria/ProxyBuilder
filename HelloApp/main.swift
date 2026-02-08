@@ -192,7 +192,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var button: NSButton?
     private var queueCountLabel: NSTextField?
     private var watermarkCheckbox: NSButton?
-    private var watermarkPopup: NSPopUpButton?
+    private var watermarkSetButton: NSButton?
     private var lutCheckbox: NSButton?
     private var lutLabel: NSTextField?
     private var dropLabel: NSTextField?
@@ -328,8 +328,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         codecPopup.action = #selector(codecPopupChanged(_:))
         self.codecPopup = codecPopup
 
-        let button = OrangeButton(frame: NSRect(x: 200, y: 210, width: 200, height: 40))
-        button.title = "Select files or folders"
+        let button = OrangeButton(frame: NSRect(x: 200, y: 200, width: 200, height: 40))
+        button.title = "Select Files or Folders..."
         button.bezelStyle = .rounded
         if #available(macOS 10.14, *) {
             button.contentTintColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) // #ff7c06
@@ -386,7 +386,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
               let logoImage = NSImage(contentsOf: logoURL) {
                 let scaledSize = NSSize(width: logoImage.size.width * 0.20, height: logoImage.size.height * 0.20)
             logoImage.size = scaledSize
-                let logoOrigin = NSPoint(x: 10, y: contentView.bounds.height - scaledSize.height)
+                let logoOrigin = NSPoint(x: 10, y: contentView.bounds.height - scaledSize.height - 20)
             let logoView = NSImageView(frame: NSRect(origin: logoOrigin, size: scaledSize))
             logoView.image = logoImage
             logoView.imageScaling = .scaleProportionallyUpOrDown
@@ -430,26 +430,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         watermarkCheckbox.state = UserDefaults.standard.bool(forKey: "watermarkEnabled") ? .on : .off
         self.watermarkCheckbox = watermarkCheckbox
 
-        let watermarkPopup = NSPopUpButton(frame: NSRect(x: 410, y: 313, width: 165, height: 26))
-        watermarkPopup.target = self
-        watermarkPopup.action = #selector(watermarkPopupChanged(_:))
-        self.watermarkPopup = watermarkPopup
-        populateWatermarkPopup()
-
-        // Check if watermark already selected and set initial states
+        let watermarkSetButton = NSButton(frame: NSRect(x: 410, y: 313, width: 60, height: 26))
+        watermarkSetButton.title = "Set…"
+        watermarkSetButton.bezelStyle = .rounded
+        watermarkSetButton.target = self
+        watermarkSetButton.action = #selector(showWatermarkManagement)
         let wmEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
-        let wmMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "library"
-        if wmMode == "library" {
-            if let savedWM = UserDefaults.standard.string(forKey: "watermarkLibraryFile") {
-                let wmPath = getWatermarkDirectoryURL().appendingPathComponent(savedWM).path
-                if FileManager.default.fileExists(atPath: wmPath) {
-                    selectWatermarkInPopup(savedWM)
-                }
-            }
-            watermarkPopup.isEnabled = wmEnabled
-        } else {
-            watermarkPopup.isEnabled = false
-        }
+        watermarkSetButton.isEnabled = wmEnabled
+        self.watermarkSetButton = watermarkSetButton
 
         // LUT checkbox and popup
         let lutCheckbox = NSButton(checkboxWithTitle: "Apply LUT", target: self, action: #selector(lutCheckboxChanged(_:)))
@@ -492,7 +480,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         contentView.addSubview(codecLabel)
         contentView.addSubview(codecPopup)
         contentView.addSubview(watermarkCheckbox)
-        contentView.addSubview(watermarkPopup)
+        contentView.addSubview(watermarkSetButton)
         contentView.addSubview(lutCheckbox)
         contentView.addSubview(lutPopup)
         contentView.addSubview(lutLabel)
@@ -664,7 +652,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     @objc func watermarkCheckboxChanged(_ sender: NSButton) {
         let isEnabled = (sender.state == .on)
         UserDefaults.standard.set(isEnabled, forKey: "watermarkEnabled")
-        updateWatermarkPopupState()
+        updateWatermarkSetButtonState()
     }
 
     private func setEncodingPath(_ prefix: String, url: URL) {
@@ -941,58 +929,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         return result
     }
 
-    private func populateWatermarkPopup() {
-        guard let popup = watermarkPopup else { return }
-        popup.removeAllItems()
-
-        let watermarks = getAvailableWatermarks()
-
-        if watermarks.isEmpty {
-            popup.addItem(withTitle: "No watermarks")
-        } else {
-            popup.addItems(withTitles: watermarks)
-        }
-
-        popup.menu?.addItem(NSMenuItem.separator())
-        popup.addItem(withTitle: "Add Watermark...")
-    }
-
-    private func selectWatermarkInPopup(_ wmName: String) {
-        guard let popup = watermarkPopup else { return }
-        if let index = popup.itemTitles.firstIndex(of: wmName) {
-            popup.selectItem(at: index)
-        }
-    }
-
-    @objc func watermarkPopupChanged(_ sender: NSPopUpButton) {
-        guard let selectedTitle = sender.titleOfSelectedItem else { return }
-        if selectedTitle == "Add Watermark..." {
-            selectWatermarkFile()
-            if let savedWM = UserDefaults.standard.string(forKey: "watermarkLibraryFile") {
-                selectWatermarkInPopup(savedWM)
-            } else {
-                sender.selectItem(at: 0)
-            }
-        } else if selectedTitle != "No watermarks" {
-            UserDefaults.standard.set(selectedTitle, forKey: "watermarkLibraryFile")
-            UserDefaults.standard.set("library", forKey: "watermarkMode")
-            UserDefaults.standard.set(true, forKey: "watermarkEnabled")
-            watermarkCheckbox?.state = .on
-            watermarkPopup?.isEnabled = true
-        }
-    }
-
-    private func updateWatermarkPopupState() {
-        let watermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "library"
-        let isLibrary = watermarkMode != "custom"
+    private func updateWatermarkSetButtonState() {
         let isEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
-        watermarkPopup?.isEnabled = isEnabled && isLibrary
-
-        if isEnabled && isLibrary {
-            if let savedWM = UserDefaults.standard.string(forKey: "watermarkLibraryFile") {
-                selectWatermarkInPopup(savedWM)
-            }
-        }
+        watermarkSetButton?.isEnabled = isEnabled
     }
 
     private func updateWindowColors() {
@@ -2550,7 +2489,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
             // Close button
             let closeButton = NSButton(frame: NSRect(x: 370, y: 15, width: 90, height: 28))
-            closeButton.title = "Close"
+            closeButton.title = "Set"
             closeButton.bezelStyle = .rounded
             closeButton.target = self
             closeButton.action = #selector(closeWatermarkManagement)
@@ -2581,16 +2520,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         guard let wmName = sender.identifier?.rawValue else { return }
         UserDefaults.standard.set(wmName, forKey: "watermarkLibraryFile")
         UserDefaults.standard.set("library", forKey: "watermarkMode")
-        populateWatermarkPopup()
-        selectWatermarkInPopup(wmName)
-        updateWatermarkPopupState()
+        updateWatermarkSetButtonState()
         refreshWatermarkManagementWindow()
     }
 
     @objc private func watermarkRadioClicked(_ sender: NSButton) {
         let isCustom = sender.tag == 1
         UserDefaults.standard.set(isCustom ? "custom" : "library", forKey: "watermarkMode")
-        updateWatermarkPopupState()
+        updateWatermarkSetButtonState()
         if let contentView = watermarkManagementWindow?.contentView {
             for subview in contentView.subviews {
                 if let textField = subview as? NSTextField,
@@ -2609,6 +2546,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
 
     @objc private func closeWatermarkManagement() {
+        // Save custom text field before closing
+        if let contentView = watermarkManagementWindow?.contentView {
+            for subview in contentView.subviews {
+                if let textField = subview as? NSTextField,
+                   textField.identifier?.rawValue == "watermarkTextField",
+                   textField.isEnabled {
+                    watermarkTextFieldChanged(textField)
+                }
+            }
+        }
         watermarkManagementWindow?.orderOut(nil)
         watermarkManagementWindow = nil
     }
@@ -2638,10 +2585,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 UserDefaults.standard.set(true, forKey: "watermarkEnabled")
                 self.watermarkCheckbox?.state = .on
 
-                // Refresh watermark popup and select the new watermark
-                self.populateWatermarkPopup()
-                self.selectWatermarkInPopup(url.lastPathComponent)
-                self.updateWatermarkPopupState()
+                self.updateWatermarkSetButtonState()
 
                 // Refresh watermark management window if it's open
                 if self.watermarkManagementWindow != nil {
@@ -2680,8 +2624,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         UserDefaults.standard.set("library", forKey: "watermarkMode")
                     }
 
-                    self.populateWatermarkPopup()
-                    self.updateWatermarkPopupState()
+                    self.updateWatermarkSetButtonState()
                     self.refreshWatermarkManagementWindow()
                 } catch {
                     let errorAlert = NSAlert()
@@ -2742,8 +2685,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         UserDefaults.standard.set(newName, forKey: "watermarkLibraryFile")
                     }
 
-                    self.populateWatermarkPopup()
-                    self.updateWatermarkPopupState()
+                    self.updateWatermarkSetButtonState()
                     self.refreshWatermarkManagementWindow()
                 } catch {
                     let errorAlert = NSAlert()
