@@ -33,9 +33,9 @@ class OrangeButton: NSButton {
     }
     
     private func setButtonDefault() {
-        self.bezelColor = NSColor(calibratedWhite: 0.5, alpha: 1.0)
-        let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.darkGray]
-        self.attributedTitle = NSAttributedString(string: self.title, attributes: attrs)
+        self.bezelColor = nil
+        self.contentTintColor = orangeColor
+        self.title = self.title  // reset to plain title, letting contentTintColor style it
     }
     
     private func updateButtonAppearance() {
@@ -661,7 +661,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         guard let label = encodingPathLabel else { return }
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
-        let linkColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        let linkColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
 
@@ -1982,7 +1982,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 guard let self = self else { return }
                 self.isProcessing = false
                 self.activeJob = nil
-                // Continue with remaining jobs
+                // Continue with remaining jobs, or restore idle state
+                if self.jobQueue.isEmpty {
+                    if let destURL = self.selectedDestinationURL {
+                        self.setEncodingPath("Will encode to", url: destURL)
+                    } else {
+                        self.clearEncodingPath()
+                    }
+                }
                 self.startNextJobIfNeeded()
             }
         }
