@@ -1689,8 +1689,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 }
 
                 args += videoFilterArgs
-                // Map data/timecode track FIRST to get track ID 1, pushing video to ID 2 and audio to IDs 3-6
-                args += ["-map", "0:d?", "-c:d", "copy"]
                 args += videoMapArgs
                 args += quickTimeCodecArgs
                 args += [
