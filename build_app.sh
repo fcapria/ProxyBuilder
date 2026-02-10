@@ -68,6 +68,13 @@ if [ -n "$HOMEBREW_FFMPEG" ] && [ -f "$HOMEBREW_FFMPEG" ]; then
         done
     done
     echo "Bundled $(ls "$LIBS_DIR"/*.dylib 2>/dev/null | wc -l | tr -d ' ') shared libraries"
+
+    # Re-sign all modified binaries (install_name_tool invalidates signatures)
+    echo "Re-signing bundled libraries..."
+    for dylib in "$LIBS_DIR"/*.dylib; do
+        codesign --force --sign - "$dylib"
+    done
+    codesign --force --sign - "$FFMPEG_BIN"
 else
     echo "ERROR: Homebrew ffmpeg not found. Install with: brew install ffmpeg"
     exit 1
