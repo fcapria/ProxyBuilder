@@ -184,6 +184,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var codecLabel: NSTextField?
     private var codecPopup: NSPopUpButton?
     private var selectedCodecIndex: Int = 0
+    private var sizePopup: NSPopUpButton?
+    private var selectedSizeIndex: Int = 0
     private var lutPopup: NSPopUpButton?
     private let sessionUUID = UUID().uuidString
     private var dropView: DropView?
@@ -267,7 +269,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 600, height: 450),
+            contentRect: NSRect(x: 100, y: 100, width: 600, height: 480),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -287,10 +289,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Output format label and popup
         let formatLabel = NSTextField(labelWithString: "Output")
-        formatLabel.frame = NSRect(x: 270, y: 406, width: 50, height: 20)
+        formatLabel.frame = NSRect(x: 270, y: 436, width: 50, height: 20)
         self.formatLabel = formatLabel
 
-        let formatPopup = NSPopUpButton(frame: NSRect(x: 325, y: 403, width: 150, height: 26))
+        let formatPopup = NSPopUpButton(frame: NSRect(x: 325, y: 433, width: 150, height: 26))
         formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4", "MXF"])
         formatPopup.selectItem(at: selectedFormat)
         formatPopup.target = self
@@ -299,10 +301,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Destination label and popup
         let destinationLabel = NSTextField(labelWithString: "Dest.")
-        destinationLabel.frame = NSRect(x: 270, y: 376, width: 50, height: 20)
+        destinationLabel.frame = NSRect(x: 270, y: 406, width: 50, height: 20)
         self.destinationLabel = destinationLabel
 
-        let destinationPopup = NSPopUpButton(frame: NSRect(x: 325, y: 373, width: 150, height: 26))
+        let destinationPopup = NSPopUpButton(frame: NSRect(x: 325, y: 403, width: 150, height: 26))
         destinationPopup.addItems(withTitles: ["Default", "Select"])
         destinationPopup.target = self
         destinationPopup.action = #selector(destinationPopupChanged(_:))
@@ -320,13 +322,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Codec label and popup
         let codecLabel = NSTextField(labelWithString: "Codec")
-        codecLabel.frame = NSRect(x: 270, y: 346, width: 50, height: 20)
+        codecLabel.frame = NSRect(x: 270, y: 376, width: 50, height: 20)
         self.codecLabel = codecLabel
 
-        let codecPopup = NSPopUpButton(frame: NSRect(x: 325, y: 343, width: 150, height: 26))
+        let codecPopup = NSPopUpButton(frame: NSRect(x: 325, y: 373, width: 150, height: 26))
         codecPopup.target = self
         codecPopup.action = #selector(codecPopupChanged(_:))
         self.codecPopup = codecPopup
+
+        // Size label and popup
+        let sizeLabel = NSTextField(labelWithString: "Size")
+        sizeLabel.frame = NSRect(x: 270, y: 346, width: 50, height: 20)
+
+        let sizePopup = NSPopUpButton(frame: NSRect(x: 325, y: 343, width: 150, height: 26))
+        sizePopup.addItems(withTitles: ["Full", "Half"])
+        selectedSizeIndex = UserDefaults.standard.integer(forKey: "selectedSizeIndex")
+        sizePopup.selectItem(at: selectedSizeIndex)
+        sizePopup.target = self
+        sizePopup.action = #selector(sizePopupChanged(_:))
+        self.sizePopup = sizePopup
 
         let button = OrangeButton(frame: NSRect(x: 200, y: 200, width: 200, height: 40))
         button.title = "Select Files or Folders..."
@@ -479,6 +493,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         contentView.addSubview(destinationPopup)
         contentView.addSubview(codecLabel)
         contentView.addSubview(codecPopup)
+        contentView.addSubview(sizeLabel)
+        contentView.addSubview(sizePopup)
         contentView.addSubview(watermarkCheckbox)
         contentView.addSubview(watermarkSetButton)
         contentView.addSubview(lutCheckbox)
@@ -589,6 +605,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     @objc func codecPopupChanged(_ sender: NSPopUpButton) {
         selectedCodecIndex = sender.indexOfSelectedItem
         UserDefaults.standard.set(selectedCodecIndex, forKey: "selectedCodecIndex_\(selectedFormat)")
+    }
+
+    @objc func sizePopupChanged(_ sender: NSPopUpButton) {
+        selectedSizeIndex = sender.indexOfSelectedItem
+        UserDefaults.standard.set(selectedSizeIndex, forKey: "selectedSizeIndex")
     }
 
     @objc func destinationPopupChanged(_ sender: NSPopUpButton) {
@@ -1440,9 +1461,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 }
             }
         }
-        let wmHeight = max(videoHeight * 15 / 100, 160)
-        let wmPadX = videoWidth * 5 / 100
-        let wmPadY = videoHeight * 5 / 100
+        let isHalfSize = (self.sizePopup?.indexOfSelectedItem ?? 0) == 1
+        let videoScaleExpr = isHalfSize ? "trunc(iw/4)*2:trunc(ih/4)*2" : "-1:-1"
+        let scalePrefix = isHalfSize ? "scale=trunc(iw/4)*2:trunc(ih/4)*2:flags=bicubic:out_color_matrix=bt709," : ""
+        let sizeDiv = isHalfSize ? 2 : 1
+        let wmHeight = max(videoHeight * 15 / 100 / sizeDiv, 160 / sizeDiv)
+        let wmPadX = videoWidth * 5 / 100 / sizeDiv
+        let wmPadY = videoHeight * 5 / 100 / sizeDiv
         // Anamorphic correction: scale to target height preserving AR, then squeeze width
         var wmScaleFilter = "scale=-1:\(wmHeight)"
         if videoWidth > 0 && videoHeight > 0 && darNum > 0 && darDen > 0 {
@@ -1456,7 +1481,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth), height: \(videoHeight), DAR: \(darNum):\(darDen), wmScaleFilter: \(wmScaleFilter), wmHeight: \(wmHeight)\n")
 
         // Use software encoder for oversized videos (VideoToolbox max is ~4096 width)
-        let useHardwareEncoder = videoWidth > 0 && videoWidth <= 4096
+        let effectiveWidth = isHalfSize ? videoWidth / 2 : videoWidth
+        let useHardwareEncoder = effectiveWidth > 0 && effectiveWidth <= 4096
 
         // H.264 codec for intermediate conversions (MOV files need AVFoundation step)
         let h264Codec = useHardwareEncoder ? "h264_videotoolbox" : "libx264"
@@ -1541,7 +1567,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                             if hasLUT {
                                 filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                             }
-                            filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                            filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                             args = [
                                 "-i", intermediateURL.path,
@@ -1560,8 +1586,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                 outputFileURL.path
                             ]
                         } else if hasCustomTextWatermark {
-                            // Build filter chain with optional LUT and custom text watermark
-                            var filterChain = ""
+                            // Build filter chain with optional scale, LUT and custom text watermark
+                            var filterChain = scalePrefix
                             if hasLUT {
                                 filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                             }
@@ -1592,7 +1618,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                 args = [
                                     "-i", intermediateURL.path,
                                     "-i", mxfFile.path,
-                                    "-vf", "lut3d=file=\(escapePathForFFmpegFilter(lutPath!))",
+                                    "-vf", "\(scalePrefix)lut3d=file=\(escapePathForFFmpegFilter(lutPath!))",
                                     "-map", "1:d?",
                                     "-c:d", "copy",
                                     "-map", "0:v",
@@ -1605,9 +1631,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                     outputFileURL.path
                                 ]
                             } else {
+                                let vfArgs: [String] = isHalfSize ? ["-vf", "scale=trunc(iw/4)*2:trunc(ih/4)*2:flags=bicubic:out_color_matrix=bt709"] : []
                                 args = [
                                     "-i", intermediateURL.path,
                                     "-i", mxfFile.path,
+                                ] + vfArgs + [
                                     "-map", "1:d?",
                                     "-c:d", "copy",
                                     "-map", "0:v",
@@ -1661,13 +1689,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     if hasLUT {
                         filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
-                    filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                    filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                     videoFilterArgs = ["-filter_complex", filterChain]
                     videoMapArgs = ["-map", "[v]"]
                 } else if hasCustomTextWatermark {
-                    // Build filter chain with optional LUT and custom text watermark
-                    var filterChain = ""
+                    // Build filter chain with optional scale, LUT and custom text watermark
+                    var filterChain = scalePrefix
                     if hasLUT {
                         filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
@@ -1680,11 +1708,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     videoMapArgs = ["-map", "0:v"]
                 } else if hasLUT {
                     // LUT only, no watermark
-                    videoFilterArgs = ["-vf", "lut3d=file=\(escapePathForFFmpegFilter(lutPath!))"]
+                    videoFilterArgs = ["-vf", "\(scalePrefix)lut3d=file=\(escapePathForFFmpegFilter(lutPath!))"]
                     videoMapArgs = ["-map", "0:v"]
                 } else {
                     // No watermark, no LUT
-                    videoFilterArgs = []
+                    if isHalfSize {
+                        videoFilterArgs = ["-vf", "scale=trunc(iw/4)*2:trunc(ih/4)*2:flags=bicubic:out_color_matrix=bt709"]
+                    } else {
+                        videoFilterArgs = []
+                    }
                     videoMapArgs = ["-map", "0:v"]
                 }
 
@@ -1732,11 +1764,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
             } else if hasCustomTextWatermark {
-                var filterChain = ""
+                var filterChain = scalePrefix
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
@@ -1744,10 +1776,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 videoFilterArgs = ["-vf", filterChain]
                 videoMapArgs = ["-map", "0:v"]
             } else if hasLUT {
-                videoFilterArgs = ["-vf", "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),format=\(videoPixelFormat)"]
+                videoFilterArgs = ["-vf", "\(scalePrefix)lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),format=\(videoPixelFormat)"]
                 videoMapArgs = ["-map", "0:v"]
             } else {
-                videoFilterArgs = ["-vf", "format=\(videoPixelFormat)"]
+                videoFilterArgs = ["-vf", "\(scalePrefix)format=\(videoPixelFormat)"]
                 videoMapArgs = ["-map", "0:v"]
             }
 
@@ -1801,13 +1833,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=-1:-1:flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
             } else if hasCustomTextWatermark {
-                // Build filter chain with optional LUT and custom text watermark
-                var filterChain = ""
+                // Build filter chain with optional scale, LUT and custom text watermark
+                var filterChain = scalePrefix
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
@@ -1818,11 +1850,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 videoMapArgs = ["-map", "0:v"]
             } else if hasLUT {
                 // LUT only, no watermark
-                videoFilterArgs = ["-vf", "lut3d=file=\(escapePathForFFmpegFilter(lutPath!))"]
+                videoFilterArgs = ["-vf", "\(scalePrefix)lut3d=file=\(escapePathForFFmpegFilter(lutPath!))"]
                 videoMapArgs = ["-map", "0:v"]
             } else {
                 // No watermark, no LUT
-                videoFilterArgs = []
+                if isHalfSize {
+                    videoFilterArgs = ["-vf", "scale=trunc(iw/4)*2:trunc(ih/4)*2:flags=bicubic:out_color_matrix=bt709"]
+                } else {
+                    videoFilterArgs = []
+                }
                 videoMapArgs = ["-map", "0:v"]
             }
 
