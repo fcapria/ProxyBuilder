@@ -1,5 +1,7 @@
+
 import AppKit
 import AVFoundation
+import UniformTypeIdentifiers
 
 let app = NSApplication.shared
 @MainActor
@@ -205,6 +207,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var destinationLabel: NSTextField?
     private var selectedDestinationURL: URL?
     private var dropBorderLayer: CAShapeLayer?
+    private var didAutoHalfSize = false
     private var gearButton: NSButton?
     private var selectedFormat: Int = 0
     private var selectedMode: Int = 0
@@ -482,6 +485,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     lutLabel.stringValue = savedLUT
                     // Color will be set by updateWindowColors()
                 }
+            } else {
+                // LUT file not found — keep checkbox/popup state, label stays empty
+                lutCheckbox.state = lutEnabled ? .on : .off
             }
         }
         // Set initial enabled state for LUT popup
@@ -653,10 +659,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         for codec in codecs {
             popup.addItem(withTitle: codec.displayName)
         }
-        // Reset to first codec (default) when format changes
-        selectedCodecIndex = 0
-        popup.selectItem(at: 0)
-        UserDefaults.standard.set(selectedCodecIndex, forKey: "selectedCodecIndex_\(selectedFormat)")
+        // Restore saved codec for this format, or default to first
+        let savedIndex = UserDefaults.standard.integer(forKey: "selectedCodecIndex_\(selectedFormat)")
+        if savedIndex < codecs.count {
+            selectedCodecIndex = savedIndex
+        } else {
+            selectedCodecIndex = 0
+        }
+        popup.selectItem(at: selectedCodecIndex)
     }
 
     @objc func modePopupChanged(_ sender: NSPopUpButton) {
@@ -799,7 +809,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedFileTypes = ["cube"]
+        panel.allowedContentTypes = [UTType(filenameExtension: "cube") ?? .data]
         panel.message = "Select a LUT file (.cube format)"
         
         panel.begin { [weak self] response in
@@ -1301,6 +1311,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
                     DispatchQueue.main.async { [weak self] in
                         guard let self = self else { return }
+                        self.didAutoHalfSize = false
                         self.setEncodingPath("Encoding to", url: finalDestinationURL)
                         self.processNextFile(index: 0, mxfFiles: finalMxfFiles, proxyFolderURL: finalDestinationURL, outputFormat: outputFormat, completion: completion)
                     }
@@ -1313,6 +1324,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         guard index < mxfFiles.count else {
             print("Conversion complete: \(proxyFolderURL.path)")
             self.setEncodingPath("Encoded to", url: proxyFolderURL)
+            if self.didAutoHalfSize {
+                let alert = NSAlert()
+                alert.messageText = "Half Resolution Applied"
+                alert.informativeText = "One or more files exceeded 4096px and were encoded at half resolution. H.264/H.265 hardware encoding is limited to 4096px."
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "OK")
+                if let window = self.window {
+                    alert.beginSheetModal(for: window)
+                }
+            }
             completion()
             return
         }
@@ -1427,11 +1448,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let debugLog = "Using ffmpeg at: \(debugPath)\n"
         appendLog(logURL: logURL, entry: debugLog)
 
-        // Get video dimensions using ffmpeg (AVFoundation can't read MXF)
+        // Get video dimensions and codec using ffmpeg probe
         var videoWidth: Int = 0
         var videoHeight: Int = 0
         var darNum: Int = 0
         var darDen: Int = 0
+        var sourceIsProRes = false
+        var sourceHasAudio = false
         if let ffmpegPath = ffmpegURL?.path {
             let probe = Process()
             probe.executableURL = URL(fileURLWithPath: ffmpegPath)
@@ -1450,6 +1473,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     videoWidth = Int(output[widthRange]) ?? 0
                     videoHeight = Int(output[heightRange]) ?? 0
                 }
+                // Detect if source is ProRes (needs AVFoundation for high bit-depth)
+                if output.contains("Video: prores") {
+                    sourceIsProRes = true
+                }
+                // Detect if source has audio streams
+                if output.contains("Audio:") {
+                    sourceHasAudio = true
+                }
                 // Parse DAR (e.g. "DAR 16:9")
                 let darPattern = #"DAR (\d+):(\d+)"#
                 if let darRegex = try? NSRegularExpression(pattern: darPattern),
@@ -1461,7 +1492,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 }
             }
         }
-        let isHalfSize = (self.sizePopup?.indexOfSelectedItem ?? 0) == 1
+        var isHalfSize = (self.sizePopup?.indexOfSelectedItem ?? 0) == 1
+
+        // Auto-force half-size for H.264/H.265 when source exceeds VideoToolbox 4096px limit
+        let selectedCodecForSizeCheck = currentVideoCodec()
+        let needsVideoToolbox = selectedCodecForSizeCheck == .h264 || selectedCodecForSizeCheck == .h265
+        if videoWidth > 4096 && !isHalfSize && needsVideoToolbox {
+            isHalfSize = true
+            didAutoHalfSize = true
+            appendLog(logURL: logURL, entry: "Auto-enabling half-size: source width \(videoWidth)px exceeds VideoToolbox 4096px limit for \(selectedCodecForSizeCheck.displayName)\n")
+        }
         let videoScaleExpr = isHalfSize ? "trunc(iw/4)*2:trunc(ih/4)*2" : "-1:-1"
         let scalePrefix = isHalfSize ? "scale=trunc(iw/4)*2:trunc(ih/4)*2:flags=bicubic:out_color_matrix=bt709," : ""
         let sizeDiv = isHalfSize ? 2 : 1
@@ -1480,13 +1520,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
         appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth), height: \(videoHeight), DAR: \(darNum):\(darDen), wmScaleFilter: \(wmScaleFilter), wmHeight: \(wmHeight)\n")
 
-        // Use software encoder for oversized videos (VideoToolbox max is ~4096 width)
-        let effectiveWidth = isHalfSize ? videoWidth / 2 : videoWidth
-        let useHardwareEncoder = effectiveWidth > 0 && effectiveWidth <= 4096
-
-        // H.264 codec for intermediate conversions (MOV files need AVFoundation step)
-        let h264Codec = useHardwareEncoder ? "h264_videotoolbox" : "libx264"
-        let h264PixelFormat = useHardwareEncoder ? "nv12" : "yuv420p"
+        // Always use VideoToolbox hardware encoders (LGPL build has no libx264/libx265)
+        let h264Codec = "h264_videotoolbox"
+        let h264PixelFormat = "nv12"
 
         // Get selected codec
         let selectedCodec = currentVideoCodec()
@@ -1496,15 +1532,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let videoCodecArgs: [String]
         switch selectedCodec {
         case .h265:
-            let codec = useHardwareEncoder ? "hevc_videotoolbox" : "libx265"
-            let presetArgs = useHardwareEncoder ? [] : ["-preset", "fast"]
-            let pixFmtArgs = useHardwareEncoder ? ["-pix_fmt", "p010le"] : []
-            videoCodecArgs = ["-c:v", codec] + presetArgs + pixFmtArgs + ["-b:v", "10M", "-tag:v", "hvc1"]
+            videoCodecArgs = ["-c:v", "hevc_videotoolbox", "-pix_fmt", "p010le", "-b:v", "10M", "-tag:v", "hvc1"]
         case .h264:
-            let codec = useHardwareEncoder ? "h264_videotoolbox" : "libx264"
-            let presetArgs = useHardwareEncoder ? [] : ["-preset", "fast"]
-            let pixFmtArgs = useHardwareEncoder ? ["-pix_fmt", "nv12"] : []
-            videoCodecArgs = ["-c:v", codec] + presetArgs + pixFmtArgs + ["-b:v", "10M"]
+            videoCodecArgs = ["-c:v", "h264_videotoolbox", "-pix_fmt", "nv12", "-b:v", "10M"]
         case .proresProxy:
             videoCodecArgs = ["-c:v", "prores_ks", "-profile:v", "0", "-pix_fmt", "yuv422p10le"]
         case .dnxhrLB:
@@ -1518,9 +1548,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let videoPixelFormat: String
         switch selectedCodec {
         case .h265:
-            videoPixelFormat = useHardwareEncoder ? "p010le" : "yuv420p"
+            videoPixelFormat = "p010le"
         case .h264:
-            videoPixelFormat = useHardwareEncoder ? "nv12" : "yuv420p"
+            videoPixelFormat = "nv12"
         case .proresProxy, .dnxhrLB, .mpeg2:
             videoPixelFormat = "yuv420p"
         }
@@ -1531,8 +1561,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         switch outputFormat {
         case .quickTime:
-            // For MOV files, check if it's high bit-depth ProRes
-            let needsIntermediateConversion = mxfFile.pathExtension.lowercased() == "mov"
+            // Only ProRes MOV files need AVFoundation intermediate (handles high bit-depth)
+            // Other MOV codecs (DNxHR, H.264, etc.) go direct through FFmpeg
+            let needsIntermediateConversion = mxfFile.pathExtension.lowercased() == "mov" && sourceIsProRes
             
             if needsIntermediateConversion {
                 // Step 1: Use AVFoundation to convert ProRes to H.264 (handles all bit depths)
@@ -1557,6 +1588,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
                         let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
                         let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
+                        if lutEnabled && !hasLUT {
+                            self.appendLog(logURL: logURL, entry: "WARNING: LUT enabled but file not found: \(lutPath ?? "nil")\n")
+                        }
                         self.appendLog(logURL: logURL, entry: "LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
                         
                         // Step 2: Apply LUT and/or watermark to AVFoundation intermediate
@@ -1577,11 +1611,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                 "-map", "2:d?",
                                 "-c:d", "copy",
                                 "-map", "[v]",
-                                "-map", "2:a?",
+                            ] + (sourceHasAudio ? ["-map", "2:a?", "-c:a", "copy", "-map_metadata:s:a", "2:s:a"] : []) + [
                                 "-c:v", h264Codec,
                                 "-b:v", "10M",
-                                "-c:a", "copy",
-                                "-map_metadata:s:a", "2:s:a",
                                 "-sn",
                                 outputFileURL.path
                             ]
@@ -1604,11 +1636,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                 "-map", "1:d?",
                                 "-c:d", "copy",
                                 "-map", "0:v",
-                                "-map", "1:a?",
+                            ] + (sourceHasAudio ? ["-map", "1:a?", "-c:a", "copy", "-map_metadata:s:a", "1:s:a"] : []) + [
                                 "-c:v", h264Codec,
                                 "-b:v", "10M",
-                                "-c:a", "copy",
-                                "-map_metadata:s:a", "1:s:a",
                                 "-sn",
                                 outputFileURL.path
                             ]
@@ -1622,11 +1652,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                     "-map", "1:d?",
                                     "-c:d", "copy",
                                     "-map", "0:v",
-                                    "-map", "1:a?",
+                                ] + (sourceHasAudio ? ["-map", "1:a?", "-c:a", "copy", "-map_metadata:s:a", "1:s:a"] : []) + [
                                     "-c:v", h264Codec,
                                     "-b:v", "10M",
-                                    "-c:a", "copy",
-                                    "-map_metadata:s:a", "1:s:a",
                                     "-sn",
                                     outputFileURL.path
                                 ]
@@ -1639,11 +1667,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                                     "-map", "1:d?",
                                     "-c:d", "copy",
                                     "-map", "0:v",
-                                    "-map", "1:a?",
+                                ] + (sourceHasAudio ? ["-map", "1:a?", "-c:a", "copy", "-map_metadata:s:a", "1:s:a"] : []) + [
                                     "-c:v", h264Codec,
                                     "-b:v", "10M",
-                                    "-c:a", "copy",
-                                    "-map_metadata:s:a", "1:s:a",
                                     "-sn",
                                     outputFileURL.path
                                 ]
@@ -1672,6 +1698,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
                 let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
                 let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
+                if lutEnabled && !hasLUT {
+                    self.appendLog(logURL: logURL, entry: "WARNING: LUT enabled but file not found: \(lutPath ?? "nil")\n")
+                }
                 self.appendLog(logURL: logURL, entry: "MXF->QT: LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
 
                 var args = (forceOverwrite || self.overwriteAllFiles) ? ["-y", "-i", mxfFile.path] : ["-i", mxfFile.path]
@@ -1752,6 +1781,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
             let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
             let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
+            if lutEnabled && !hasLUT {
+                self.appendLog(logURL: logURL, entry: "WARNING: LUT enabled but file not found: \(lutPath ?? "nil")\n")
+            }
             self.appendLog(logURL: logURL, entry: "MPEG-4: LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
 
             var args = (forceOverwrite || self.overwriteAllFiles) ? ["-y", "-i", mxfFile.path] : ["-i", mxfFile.path]
@@ -1816,6 +1848,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
             let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
             let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
+            if lutEnabled && !hasLUT {
+                self.appendLog(logURL: logURL, entry: "WARNING: LUT enabled but file not found: \(lutPath ?? "nil")\n")
+            }
             self.appendLog(logURL: logURL, entry: "MXF output: LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
 
             // Step 1: Create intermediate video with LUT and/or watermark
@@ -2022,9 +2057,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if self.jobQueue.isEmpty {
                     if let destURL = self.selectedDestinationURL {
                         self.setEncodingPath("Will encode to", url: destURL)
-                    } else {
-                        self.clearEncodingPath()
                     }
+                    // Otherwise keep "Encoded to" path visible
                 }
                 self.startNextJobIfNeeded()
             }
@@ -2252,7 +2286,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         self.lutLabel?.stringValue = ""
                     }
 
-                    // Refresh the window
+                    // Refresh the main LUT popup and re-select
+                    self.populateLUTPopup()
+                    if let currentLUT = UserDefaults.standard.string(forKey: "lutFilePath") {
+                        self.selectLUTInPopup(currentLUT)
+                    }
+
+                    // Refresh the management window
                     self.closeLUTManagement()
                     self.selectLUT()
                 } catch {
@@ -2317,7 +2357,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         self.lutLabel?.stringValue = newLutName
                     }
 
-                    // Refresh the window
+                    // Refresh the main LUT popup and re-select
+                    self.populateLUTPopup()
+                    if let currentLUT = UserDefaults.standard.string(forKey: "lutFilePath") {
+                        self.selectLUTInPopup(currentLUT)
+                    }
+
+                    // Refresh the management window
                     self.closeLUTManagement()
                     self.selectLUT()
                 } catch {
@@ -2633,7 +2679,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedFileTypes = ["png", "jpg", "jpeg", "tiff", "bmp"]
+        panel.allowedContentTypes = [.png, .jpeg, .tiff, .bmp]
         panel.message = "Select a watermark image file"
 
         panel.begin { [weak self] response in
@@ -2957,14 +3003,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         exportSession.outputURL = outputURL
         exportSession.outputFileType = .mov
         
-        exportSession.exportAsynchronously {
+        nonisolated(unsafe) let session = exportSession
+        nonisolated(unsafe) let done = completion
+        session.exportAsynchronously {
             DispatchQueue.main.async { [weak self] in
-                let success = exportSession.status == .completed
+                let success = session.status == .completed
                 if !success {
-                    let error = exportSession.error?.localizedDescription ?? "unknown error"
+                    let error = session.error?.localizedDescription ?? "unknown error"
                     self?.appendLog(logURL: logURL, entry: "AVFoundation export failed: \(error)\n")
                 }
-                completion(success)
+                done(success)
             }
         }
     }

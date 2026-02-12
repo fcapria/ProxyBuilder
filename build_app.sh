@@ -18,14 +18,31 @@ mkdir -p MXF2PRXY.app/Contents/Resources
 # Copy binary
 cp .build/debug/MXFToQuickTime MXF2PRXY.app/Contents/MacOS/MXF2PRXY
 
-# Use Homebrew ffmpeg (has working VideoToolbox hardware encoding)
+# Use LGPL-built ffmpeg (falls back to Homebrew if LGPL build not found)
+LGPL_FFMPEG="$(pwd)/ffmpeg-lgpl/bin/ffmpeg"
 HOMEBREW_FFMPEG=$(which ffmpeg 2>/dev/null || echo "")
-if [ -n "$HOMEBREW_FFMPEG" ] && [ -f "$HOMEBREW_FFMPEG" ]; then
-    echo "Using Homebrew ffmpeg: $HOMEBREW_FFMPEG"
-    cp "$HOMEBREW_FFMPEG" MXF2PRXY.app/Contents/MacOS/ffmpeg
 
-    # Bundle all shared libraries so the app is self-contained
+if [ -n "$FFMPEG_LGPL" ] && [ -f "$FFMPEG_LGPL" ]; then
+    FFMPEG_SRC="$FFMPEG_LGPL"
+    echo "Using ffmpeg from FFMPEG_LGPL env: $FFMPEG_SRC"
+elif [ -f "$LGPL_FFMPEG" ]; then
+    FFMPEG_SRC="$LGPL_FFMPEG"
+    echo "Using LGPL-built ffmpeg: $FFMPEG_SRC"
+elif [ -n "$HOMEBREW_FFMPEG" ] && [ -f "$HOMEBREW_FFMPEG" ]; then
+    FFMPEG_SRC="$HOMEBREW_FFMPEG"
+    echo "WARNING: Using Homebrew ffmpeg (may be GPL). Build LGPL version with: ./build_ffmpeg_lgpl.sh"
+else
+    echo "ERROR: No ffmpeg found. Build LGPL version with: ./build_ffmpeg_lgpl.sh"
+    echo "  Or install Homebrew ffmpeg with: brew install ffmpeg"
+    exit 1
+fi
+
+if [ -f "$FFMPEG_SRC" ]; then
+    cp "$FFMPEG_SRC" MXF2PRXY.app/Contents/MacOS/ffmpeg
+
+    # Clean old frameworks and bundle fresh shared libraries
     LIBS_DIR="MXF2PRXY.app/Contents/Frameworks"
+    rm -rf "$LIBS_DIR"
     mkdir -p "$LIBS_DIR"
     FFMPEG_BIN="MXF2PRXY.app/Contents/MacOS/ffmpeg"
 
@@ -75,9 +92,6 @@ if [ -n "$HOMEBREW_FFMPEG" ] && [ -f "$HOMEBREW_FFMPEG" ]; then
         codesign --force --sign - "$dylib"
     done
     codesign --force --sign - "$FFMPEG_BIN"
-else
-    echo "ERROR: Homebrew ffmpeg not found. Install with: brew install ffmpeg"
-    exit 1
 fi
 
 # Copy icon and resources
