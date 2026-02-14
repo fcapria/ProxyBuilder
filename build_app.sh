@@ -161,6 +161,13 @@ cp AppIcon.icns MXF2PRXY.app/Contents/Resources/
 cp -f MXF2Prxy-logo.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
 cp -f watermark.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
 
+# Bundle LGPL source materials (build script + patches for reproducible FFmpeg build)
+LGPL_DIR="MXF2PRXY.app/Contents/Resources/LGPL-Sources"
+mkdir -p "$LGPL_DIR"
+cp build_ffmpeg_dylib.sh "$LGPL_DIR/"
+cp -R patches/ "$LGPL_DIR/patches/" 2>/dev/null || true
+echo "  Bundled LGPL source materials in Resources/LGPL-Sources/"
+
 # Auto-increment build number
 CURRENT_BUILD=0
 if [ -f MXF2PRXY.app/Contents/Info.plist ]; then

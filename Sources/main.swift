@@ -180,6 +180,7 @@ protocol DropViewDelegate {
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDelegate {
     var window: NSWindow?
     weak var settingsWindow: NSWindow?
+    weak var aboutWindow: NSWindow?
     weak var lutManagementWindow: NSWindow?
     weak var watermarkManagementWindow: NSWindow?
     private var formatPopup: NSPopUpButton?
@@ -548,6 +549,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             watermarkManagementWindow?.orderOut(nil)
             watermarkManagementWindow = nil
             return false  // Prevent the actual close
+        } else if sender === aboutWindow {
+            aboutWindow?.orderOut(nil)
+            aboutWindow = nil
+            return false
         }
 
         // Allow main window to close normally (quits the app)
@@ -2815,7 +2820,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     func setupMenuBar() {
         let mainMenu = NSMenu()
         let appMenu = NSMenu()
-        
+
+        let aboutItem = NSMenuItem(title: "About MXF2PRXY", action: #selector(showAbout), keyEquivalent: "")
+        appMenu.addItem(aboutItem)
+        appMenu.addItem(NSMenuItem.separator())
+
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
         appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
@@ -2851,6 +2860,117 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         NSApplication.shared.mainMenu = mainMenu
     }
     
+    @objc func showAbout() {
+        if let existing = aboutWindow {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let aboutWin = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        aboutWin.title = "About MXF2PRXY"
+        aboutWin.center()
+        aboutWin.delegate = self
+        aboutWin.minSize = NSSize(width: 400, height: 300)
+
+        let scrollView = NSScrollView(frame: aboutWin.contentView!.bounds)
+        scrollView.autoresizingMask = [.width, .height]
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .noBorder
+
+        let textView = NSTextView(frame: scrollView.bounds)
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.autoresizingMask = [.width]
+        textView.textContainerInset = NSSize(width: 16, height: 16)
+        textView.font = NSFont.systemFont(ofSize: 12)
+
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+
+        let aboutText = """
+        MXF2PRXY  v\(version) (\(build))
+        MXF/MOV to proxy converter
+
+        This application uses the following open-source libraries. \
+        The FFmpeg libraries are dynamically linked under the terms of the \
+        GNU Lesser General Public License v2.1 (LGPL). You may replace the \
+        bundled .dylib files in Contents/Frameworks/ with modified versions; \
+        see the LGPL notice below for details.
+
+        ─────────────────────────────────────────
+        FFmpeg  (libavcodec, libavformat, libavfilter, libswscale, libswresample, libavutil)
+        Copyright (c) 2000-2024 the FFmpeg developers
+        Licensed under the GNU Lesser General Public License v2.1 or later.
+        Source: https://ffmpeg.org  ·  Build script: build_ffmpeg_dylib.sh
+
+        LGPL v2.1 — Your Rights
+        This application uses FFmpeg, LAME, fribidi, GLib, libintl, and Graphite2 \
+        under the GNU Lesser General Public License. In accordance with LGPL v2.1 \
+        Section 6, you may replace the shared libraries (.dylib files) bundled in \
+        MXF2PRXY.app/Contents/Frameworks/ with your own modified versions.
+
+        After replacing a library, re-sign the app:
+            codesign --force --deep --sign - MXF2PRXY.app
+
+        Source Code Offer
+        The complete source code for all LGPL-licensed libraries, along with the \
+        build scripts and patches needed to reproduce the bundled binaries:
+          - FFmpeg 7.1.1: https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz
+          - LAME: https://lame.sourceforge.io
+          - fribidi: https://github.com/fribidi/fribidi
+          - GLib: https://gitlab.gnome.org/GNOME/glib
+          - gettext: https://www.gnu.org/software/gettext/
+          - Graphite2: https://github.com/nickshanks/graphite
+          - Build script & patches: included in this app bundle at
+            MXF2PRXY.app/Contents/Resources/LGPL-Sources/
+        This offer is valid for three years from the date of distribution.
+
+        ─────────────────────────────────────────
+        LAME (libmp3lame)
+        Copyright (C) 1999-2011 The LAME Project, et al.
+        Licensed under the GNU Library General Public License v2 or later.
+
+        fribidi
+        Copyright (C) 2004-2024 Dov Grobgeld, Behdad Esfahbod, et al.
+        Licensed under the GNU Lesser General Public License v2.1 or later.
+
+        ─────────────────────────────────────────
+        libaom  —  Copyright (c) 2016, Alliance for Open Media. BSD 2-Clause License.
+        libvpx  —  Copyright (c) 2010, The WebM Project authors. BSD 3-Clause License.
+        opus  —  Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon. BSD 3-Clause License.
+        libvorbis  —  Copyright (c) 2002-2020 Xiph.org Foundation. BSD 3-Clause License.
+        libogg  —  Copyright (c) 2002, Xiph.org Foundation. BSD 3-Clause License.
+        libtheora  —  Copyright (C) 2002-2009 Xiph.org Foundation. BSD 3-Clause License.
+        snappy  —  Copyright 2011, Google Inc. BSD 3-Clause License.
+        libass  —  Copyright (C) 2006-2016 libass contributors. ISC License.
+        HarfBuzz  —  Copyright (c) 2010-2022 Google, Inc. et al. MIT License.
+        FreeType  —  Copyright (c) 1996-2024, David Turner, Robert Wilhelm, Werner Lemberg. FreeType License (FTL).
+        Fontconfig  —  Copyright (c) 2000-2020 Keith Packard, Red Hat Inc., et al. MIT License.
+        libpng  —  Copyright (c) 1995-2026 The PNG Reference Library Authors. libpng License.
+        Brotli  —  Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors. MIT License.
+        GLib  —  Copyright (C) 1995-2024, The GLib Team. LGPL v2.1.
+        Graphite2  —  Copyright 2010, SIL International. LGPL v2.1 / MPL / GPL v2.
+        PCRE2  —  Copyright (c) 1997-2024 Philip Hazel, University of Cambridge. BSD 3-Clause License.
+        libvmaf  —  Copyright (c) 2020 Netflix, Inc. BSD 2-Clause-Patent License.
+        zlib  —  Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler. zlib License.
+        XZ Utils (liblzma)  —  Copyright (C) The XZ Utils authors and contributors. BSD Zero Clause License.
+        bzip2  —  Copyright (c) 1996-2019, Julian Seward. bzip2 License.
+        libunibreak  —  Copyright (C) Wu Yongwei, Tom Hacohen, et al. zlib License.
+        libintl (gettext)  —  Copyright (C) 1995-2024, Free Software Foundation. LGPL v2.1.
+        """
+
+        textView.string = aboutText
+        scrollView.documentView = textView
+        aboutWin.contentView = scrollView
+        aboutWin.makeKeyAndOrderFront(nil)
+        self.aboutWindow = aboutWin
+    }
+
     @objc func showSettings() {
         if settingsWindow == nil {
             guard let mainWindow = window else { return }
