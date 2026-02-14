@@ -166,6 +166,7 @@ LGPL_DIR="MXF2PRXY.app/Contents/Resources/LGPL-Sources"
 mkdir -p "$LGPL_DIR"
 cp build_ffmpeg_dylib.sh "$LGPL_DIR/"
 cp -R patches/ "$LGPL_DIR/patches/" 2>/dev/null || true
+cp RELINKING.txt "$LGPL_DIR/"
 echo "  Bundled LGPL source materials in Resources/LGPL-Sources/"
 
 # Auto-increment build number

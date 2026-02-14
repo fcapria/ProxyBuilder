@@ -1,0 +1,98 @@
+Replacing LGPL Libraries in MXF2PRXY
+======================================
+
+This application dynamically links against FFmpeg and other libraries
+licensed under the GNU Lesser General Public License (LGPL) v2.1.
+You have the right to replace these libraries with your own modified
+versions. This document explains how.
+
+
+Which libraries can I replace?
+------------------------------
+
+The following .dylib files in MXF2PRXY.app/Contents/Frameworks/ are
+LGPL-licensed and may be replaced:
+
+  FFmpeg:
+    libavcodec.61.19.101.dylib
+    libavformat.61.7.100.dylib
+    libavfilter.10.4.100.dylib
+    libswscale.8.3.100.dylib
+    libswresample.5.3.100.dylib
+    libavutil.59.39.100.dylib
+
+  Other LGPL libraries:
+    libmp3lame.0.dylib      (LAME - MP3 encoder)
+    libfribidi.0.dylib      (fribidi - Unicode bidi algorithm)
+    libglib-2.0.0.dylib     (GLib)
+    libintl.8.dylib         (gettext internationalization)
+    libgraphite2.3.dylib    (Graphite2 font rendering)
+
+All other .dylib files in Frameworks/ are under permissive licenses
+(BSD, MIT, ISC, zlib) and may also be replaced.
+
+
+Step-by-step: Replacing a library
+----------------------------------
+
+1. Build your modified library as a .dylib for macOS arm64.
+
+   For FFmpeg, use the included build script as a starting point:
+     MXF2PRXY.app/Contents/Resources/LGPL-Sources/build_ffmpeg_dylib.sh
+
+   This script downloads FFmpeg 7.1.1 source, applies the necessary
+   patches (in LGPL-Sources/patches/), and compiles shared libraries.
+
+2. Right-click MXF2PRXY.app and select "Show Package Contents",
+   then navigate to Contents/Frameworks/.
+
+3. Replace the .dylib file(s) with your modified version(s).
+   The replacement must:
+     - Be a Mach-O dynamic library for arm64
+     - Have the same SONAME (major version number) as the original
+     - Export the same public symbols
+
+   For example, to replace libavcodec:
+     cp /path/to/your/libavcodec.61.19.101.dylib \
+        MXF2PRXY.app/Contents/Frameworks/libavcodec.61.19.101.dylib
+
+4. Set the install name to @rpath:
+     install_name_tool -id "@rpath/libavcodec.61.19.101.dylib" \
+        MXF2PRXY.app/Contents/Frameworks/libavcodec.61.19.101.dylib
+
+5. Re-sign the modified library:
+     codesign --force --sign - \
+        MXF2PRXY.app/Contents/Frameworks/libavcodec.61.19.101.dylib
+
+6. Re-sign the entire app bundle:
+     codesign --force --deep --sign - MXF2PRXY.app
+
+7. Launch the app. If it crashes, check the error with:
+     /path/to/MXF2PRXY.app/Contents/MacOS/MXF2PRXY
+   This will print any dylib loading errors to the terminal.
+
+
+Building FFmpeg from source
+----------------------------
+
+To build the exact FFmpeg libraries shipped with this app:
+
+  1. Install Homebrew (https://brew.sh) if not already installed.
+  2. Copy the build script from the app bundle:
+       cp MXF2PRXY.app/Contents/Resources/LGPL-Sources/build_ffmpeg_dylib.sh .
+       cp -R MXF2PRXY.app/Contents/Resources/LGPL-Sources/patches/ ./patches/
+  3. Run:  ./build_ffmpeg_dylib.sh
+  4. The compiled .dylib files will be in ffmpeg-dylib/lib/
+
+
+Notes
+-----
+
+- macOS Gatekeeper may quarantine modified apps. If the app won't
+  open after modification, remove the quarantine attribute:
+    xattr -cr MXF2PRXY.app
+
+- The ad-hoc signature (--sign -) is sufficient for local use.
+  For distribution, use a valid Apple Developer ID certificate.
+
+- The app requires macOS 13 (Ventura) or later on Apple Silicon.

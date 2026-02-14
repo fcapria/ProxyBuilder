@@ -2931,6 +2931,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         This offer is valid for three years from the date of distribution.
 
         ─────────────────────────────────────────
+        Replacing LGPL Libraries
+        You have the right to replace any LGPL-licensed .dylib in this app bundle \
+        with your own modified version. For step-by-step instructions, see:
+          MXF2PRXY.app/Contents/Resources/LGPL-Sources/RELINKING.txt
+
+        ─────────────────────────────────────────
         LAME (libmp3lame)
         Copyright (C) 1999-2011 The LAME Project, et al.
         Licensed under the GNU Library General Public License v2 or later.
