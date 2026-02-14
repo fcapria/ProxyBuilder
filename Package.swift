@@ -5,64 +5,32 @@ let package = Package(
     name: "MXFToQuickTime",
     platforms: [.macOS(.v13)],
     targets: [
-        // C wrapper around ffmpeg static libraries
+        // C wrapper around ffmpeg — calls ffmpeg_main() in libfftools.a,
+        // which resolves symbols from FFmpeg dylibs at runtime
         .target(
             name: "CFFmpeg",
             path: "Sources/CFFmpeg",
             publicHeadersPath: "include",
             cSettings: [
-                .headerSearchPath("../../ffmpeg-static/include"),
+                .headerSearchPath("../../ffmpeg-dylib/include"),
             ],
             linkerSettings: [
-                // FFmpeg static libs (order matters for symbol resolution)
                 .unsafeFlags([
-                    "-L./ffmpeg-static/lib",
+                    "-L./ffmpeg-dylib/lib",
                     "-L/opt/homebrew/lib",
+                    // Tell the binary to look for dylibs in Contents/Frameworks/
+                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
                 ]),
-                // fftools (our patched ffmpeg_main entry point)
+                // fftools (statically linked — our patched ffmpeg_main entry point)
                 .linkedLibrary("fftools"),
-                // FFmpeg libraries (order: higher-level first)
-                .linkedLibrary("avdevice"),
+                // FFmpeg shared libraries (resolved at runtime via @rpath)
                 .linkedLibrary("avfilter"),
                 .linkedLibrary("avformat"),
                 .linkedLibrary("avcodec"),
                 .linkedLibrary("swresample"),
                 .linkedLibrary("swscale"),
                 .linkedLibrary("avutil"),
-                // Third-party codec/format libraries
-                .linkedLibrary("aom"),
-                .linkedLibrary("vpx"),
-                .linkedLibrary("mp3lame"),
-                .linkedLibrary("opus"),
-                .linkedLibrary("snappy"),
-                .linkedLibrary("theora"),
-                .linkedLibrary("theoraenc"),
-                .linkedLibrary("theoradec"),
-                .linkedLibrary("vorbis"),
-                .linkedLibrary("vorbisenc"),
-                .linkedLibrary("ogg"),
-                // Text rendering / subtitle libraries
-                .linkedLibrary("ass"),
-                .linkedLibrary("harfbuzz"),
-                .linkedLibrary("freetype"),
-                .linkedLibrary("fontconfig"),
-                .linkedLibrary("fribidi"),
-                .linkedLibrary("unibreak"),
-                // Support libraries
-                .linkedLibrary("png"),
-                .linkedLibrary("brotlidec"),
-                .linkedLibrary("brotlienc"),
-                .linkedLibrary("brotlicommon"),
-                // X11/SDL libraries (required by libavdevice; will be removed for App Store build)
-                .linkedLibrary("SDL2"),
-                .linkedLibrary("xcb"),
-                .linkedLibrary("xcb-shm"),
-                .linkedLibrary("xcb-shape"),
-                .linkedLibrary("xcb-xfixes"),
-                .linkedLibrary("X11"),
-                .linkedLibrary("Xau"),
-                .linkedLibrary("Xdmcp"),
-                // System libraries
+                // System libraries (needed by libfftools.a static code)
                 .linkedLibrary("z"),
                 .linkedLibrary("iconv"),
                 .linkedLibrary("xml2"),
