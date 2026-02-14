@@ -1,6 +1,7 @@
 
 import AppKit
 import AVFoundation
+import CFFmpeg
 import UniformTypeIdentifiers
 
 let app = NSApplication.shared
@@ -1443,53 +1444,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Font file for drawtext filter on macOS (must be specified explicitly)
         let fontFile = escapePathForFFmpegFilter("/System/Library/Fonts/Helvetica.ttc")
 
-        let ffmpegURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("ffmpeg")
-        let debugPath = ffmpegURL?.path ?? "nil"
-        let debugLog = "Using ffmpeg at: \(debugPath)\n"
-        appendLog(logURL: logURL, entry: debugLog)
+        appendLog(logURL: logURL, entry: "Using in-process ffmpeg (static library)\n")
 
-        // Get video dimensions and codec using ffmpeg probe
+        // Get video dimensions and codec using ffmpeg probe (in-process)
         var videoWidth: Int = 0
         var videoHeight: Int = 0
         var darNum: Int = 0
         var darDen: Int = 0
         var sourceIsProRes = false
         var sourceHasAudio = false
-        if let ffmpegPath = ffmpegURL?.path {
-            let probe = Process()
-            probe.executableURL = URL(fileURLWithPath: ffmpegPath)
-            probe.arguments = ["-i", mxfFile.path, "-hide_banner"]
-            let pipe = Pipe()
-            probe.standardError = pipe  // ffmpeg outputs info to stderr
-            try? probe.run()
-            probe.waitUntilExit()
-            if let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) {
-                // Parse "1234x5678" from output
-                let pattern = #"(\d{3,5})x(\d{3,5})"#
-                if let regex = try? NSRegularExpression(pattern: pattern),
-                   let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-                   let widthRange = Range(match.range(at: 1), in: output),
-                   let heightRange = Range(match.range(at: 2), in: output) {
-                    videoWidth = Int(output[widthRange]) ?? 0
-                    videoHeight = Int(output[heightRange]) ?? 0
-                }
-                // Detect if source is ProRes (needs AVFoundation for high bit-depth)
-                if output.contains("Video: prores") {
-                    sourceIsProRes = true
-                }
-                // Detect if source has audio streams
-                if output.contains("Audio:") {
-                    sourceHasAudio = true
-                }
-                // Parse DAR (e.g. "DAR 16:9")
-                let darPattern = #"DAR (\d+):(\d+)"#
-                if let darRegex = try? NSRegularExpression(pattern: darPattern),
-                   let darMatch = darRegex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-                   let darNumRange = Range(darMatch.range(at: 1), in: output),
-                   let darDenRange = Range(darMatch.range(at: 2), in: output) {
-                    darNum = Int(output[darNumRange]) ?? 0
-                    darDen = Int(output[darDenRange]) ?? 0
-                }
+        do {
+            let probeArgs = ["ffmpeg", "-i", mxfFile.path, "-hide_banner"]
+            ffmpegRunCapture(probeArgs)
+            let output = String(cString: ffmpeg_get_captured_output())
+
+            // Parse "1234x5678" from output
+            let pattern = #"(\d{3,5})x(\d{3,5})"#
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
+               let widthRange = Range(match.range(at: 1), in: output),
+               let heightRange = Range(match.range(at: 2), in: output) {
+                videoWidth = Int(output[widthRange]) ?? 0
+                videoHeight = Int(output[heightRange]) ?? 0
+            }
+            // Detect if source is ProRes (needs AVFoundation for high bit-depth)
+            if output.contains("Video: prores") {
+                sourceIsProRes = true
+            }
+            // Detect if source has audio streams
+            if output.contains("Audio:") {
+                sourceHasAudio = true
+            }
+            // Parse DAR (e.g. "DAR 16:9")
+            let darPattern = #"DAR (\d+):(\d+)"#
+            if let darRegex = try? NSRegularExpression(pattern: darPattern),
+               let darMatch = darRegex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
+               let darNumRange = Range(darMatch.range(at: 1), in: output),
+               let darDenRange = Range(darMatch.range(at: 2), in: output) {
+                darNum = Int(output[darNumRange]) ?? 0
+                darDen = Int(output[darDenRange]) ?? 0
             }
         }
         var isHalfSize = (self.sizePopup?.indexOfSelectedItem ?? 0) == 1
@@ -1676,7 +1669,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                             }
                         }
                         
-                        self.runProcessDetached(executableURL: ffmpegURL, arguments: args, logURL: logURL) { [weak self] status2 in
+                        self.runProcessDetached(arguments: args, logURL: logURL) { [weak self] status2 in
                             DispatchQueue.main.async { [weak self] in
                                 guard let self = self else { return }
                                 if status2 != 0 {
@@ -1762,7 +1755,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
                 self.appendLog(logURL: logURL, entry: "MXF->QT FULL ARGS: \(args.joined(separator: " "))\n")
 
-                runProcessDetached(executableURL: ffmpegURL, arguments: args, logURL: logURL) { [weak self] status in
+                runProcessDetached(arguments: args, logURL: logURL) { [weak self] status in
                     DispatchQueue.main.async { [weak self] in
                         guard let self = self else { return }
                         if status != 0 {
@@ -1830,7 +1823,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
             self.appendLog(logURL: logURL, entry: "MPEG-4 FULL ARGS: \(args.joined(separator: " "))\n")
 
-            runProcessDetached(executableURL: ffmpegURL, arguments: args, logURL: logURL) { [weak self] status in
+            runProcessDetached(arguments: args, logURL: logURL) { [weak self] status in
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     if status != 0 {
@@ -1905,7 +1898,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 tempVideoURL.path
             ]
 
-            runProcessDetached(executableURL: ffmpegURL, arguments: args1, logURL: logURL) { [weak self] status1 in
+            runProcessDetached(arguments: args1, logURL: logURL) { [weak self] status1 in
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     if status1 != 0 {
@@ -1933,7 +1926,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         "-f", "mxf",
                         outputFileURL.path
                     ]
-                    self.runProcessDetached(executableURL: ffmpegURL, arguments: args2, logURL: logURL) { [weak self] status2 in
+                    self.runProcessDetached(arguments: args2, logURL: logURL) { [weak self] status2 in
                         DispatchQueue.main.async { [weak self] in
                             guard let self = self else { return }
                             // Clean up temp file
@@ -1991,36 +1984,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         self.processNextFile(index: index, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, forceOverwrite: shouldOverwrite, completion: completion)
     }
 
-    private func runProcessDetached(executableURL: URL?, arguments: [String], logURL: URL, completion: @escaping @Sendable (Int32) -> Void) {
-        guard let executableURL = executableURL else {
-            completion(-1)
-            return
-        }
-
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
-
+    private func runProcessDetached(arguments: [String], logURL: URL, completion: @escaping @Sendable (Int32) -> Void) {
         if !FileManager.default.fileExists(atPath: logURL.path) {
             FileManager.default.createFile(atPath: logURL.path, contents: nil)
         }
 
         let logHandle = FileHandle(forWritingAtPath: logURL.path)
         logHandle?.seekToEndOfFile()
-        process.standardOutput = logHandle
-        process.standardError = logHandle
+        let logFD = logHandle?.fileDescriptor ?? -1
 
-        process.terminationHandler = { _ in
-            logHandle?.closeFile()
-            completion(process.terminationStatus)
-        }
+        let fullArgs = ["ffmpeg"] + arguments
+        nonisolated(unsafe) let args = fullArgs
+        nonisolated(unsafe) let fd = logFD
+        nonisolated(unsafe) let handle = logHandle
+        nonisolated(unsafe) let done = completion
 
-        do {
-            try process.run()
-        } catch {
-            logHandle?.closeFile()
-            completion(-1)
+        DispatchQueue.global(qos: .userInitiated).async {
+            var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
+            defer { cArgs.forEach { free($0) } }
+            let ret = ffmpeg_run(Int32(args.count), &cArgs, Int32(fd))
+            handle?.closeFile()
+
+            DispatchQueue.main.async {
+                done(ret)
+            }
         }
+    }
+
+    @discardableResult
+    private func ffmpegRunCapture(_ args: [String]) -> Int32 {
+        var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
+        defer { cArgs.forEach { free($0) } }
+        return ffmpeg_run(Int32(args.count), &cArgs, -1)
     }
 
     private func appendLog(logURL: URL, entry: String) {

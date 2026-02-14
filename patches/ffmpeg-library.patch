@@ -1,0 +1,57 @@
+diff -u a/fftools/ffmpeg.c b/fftools/ffmpeg.c
+--- a/fftools/ffmpeg.c
++++ b/fftools/ffmpeg.c
+@@ -147,8 +147,8 @@
+     received_sigterm = sig;
+     received_nb_signals++;
+     term_exit_sigsafe();
+     if(received_nb_signals > 3) {
+-        ret = write(2/*STDERR_FILENO*/, "Received > 3 system signals, hard exiting\n",
+-                    strlen("Received > 3 system signals, hard exiting\n"));
+-        if (ret < 0) { /* Do nothing */ };
+-        exit(123);
++        /* In library mode, do not exit the host process */
++        return;
+     }
+ }
+@@ -943,7 +943,7 @@
+ #endif
+ }
+
+-int main(int argc, char **argv)
++int ffmpeg_main(int argc, char **argv)
+ {
+     Scheduler *sch = NULL;
+
+@@ -951,6 +951,18 @@
+     int ret;
+     BenchmarkTimeStamps ti;
+
++    /* Reset global state from previous invocation (library mode) */
++    nb_input_files = 0;
++    nb_output_files = 0;
++    nb_filtergraphs = 0;
++    nb_decoders = 0;
++    received_sigterm = 0;
++    received_nb_signals = 0;
++    atomic_store(&transcode_init_done, 0);
++    ffmpeg_exited = 0;
++    copy_ts_first_pts = AV_NOPTS_VALUE;
++    stdin_interaction = 0;  /* No TTY interaction in library mode */
++
+     init_dynload();
+
+     setvbuf(stderr,NULL,_IONBF,0); /* win32 runtime needs this */
+diff -u a/fftools/ffmpeg_opt.c b/fftools/ffmpeg_opt.c
+--- a/fftools/ffmpeg_opt.c
++++ b/fftools/ffmpeg_opt.c
+@@ -1368,7 +1368,7 @@
+         goto fail;
+     }
+
+-    /* configure terminal and setup signal handlers */
+-    term_init();
++    /* Skip term_init() in library mode — don't hijack host app signals/TTY */
++    /* term_init(); */
+
+     /* open input files */

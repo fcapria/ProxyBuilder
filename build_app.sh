@@ -18,81 +18,10 @@ mkdir -p MXF2PRXY.app/Contents/Resources
 # Copy binary
 cp .build/debug/MXFToQuickTime MXF2PRXY.app/Contents/MacOS/MXF2PRXY
 
-# Use LGPL-built ffmpeg (falls back to Homebrew if LGPL build not found)
-LGPL_FFMPEG="$(pwd)/ffmpeg-lgpl/bin/ffmpeg"
-HOMEBREW_FFMPEG=$(which ffmpeg 2>/dev/null || echo "")
-
-if [ -n "$FFMPEG_LGPL" ] && [ -f "$FFMPEG_LGPL" ]; then
-    FFMPEG_SRC="$FFMPEG_LGPL"
-    echo "Using ffmpeg from FFMPEG_LGPL env: $FFMPEG_SRC"
-elif [ -f "$LGPL_FFMPEG" ]; then
-    FFMPEG_SRC="$LGPL_FFMPEG"
-    echo "Using LGPL-built ffmpeg: $FFMPEG_SRC"
-elif [ -n "$HOMEBREW_FFMPEG" ] && [ -f "$HOMEBREW_FFMPEG" ]; then
-    FFMPEG_SRC="$HOMEBREW_FFMPEG"
-    echo "WARNING: Using Homebrew ffmpeg (may be GPL). Build LGPL version with: ./build_ffmpeg_lgpl.sh"
-else
-    echo "ERROR: No ffmpeg found. Build LGPL version with: ./build_ffmpeg_lgpl.sh"
-    echo "  Or install Homebrew ffmpeg with: brew install ffmpeg"
-    exit 1
-fi
-
-if [ -f "$FFMPEG_SRC" ]; then
-    cp "$FFMPEG_SRC" MXF2PRXY.app/Contents/MacOS/ffmpeg
-
-    # Clean old frameworks and bundle fresh shared libraries
-    LIBS_DIR="MXF2PRXY.app/Contents/Frameworks"
-    rm -rf "$LIBS_DIR"
-    mkdir -p "$LIBS_DIR"
-    FFMPEG_BIN="MXF2PRXY.app/Contents/MacOS/ffmpeg"
-
-    # Copy non-system dylibs and rewrite paths
-    copy_and_rewrite_deps() {
-        local binary="$1"
-        otool -L "$binary" | awk '{print $1}' | tail -n +2 | while read -r lib; do
-            # Skip system libraries and self-references
-            case "$lib" in
-                /System/*|/usr/lib/*|@*) continue ;;
-            esac
-            local libname
-            libname=$(basename "$lib")
-            if [ ! -f "$LIBS_DIR/$libname" ]; then
-                echo "  Bundling: $libname"
-                cp "$lib" "$LIBS_DIR/$libname"
-                chmod 755 "$LIBS_DIR/$libname"
-                # Recursively handle dependencies of this library
-                copy_and_rewrite_deps "$LIBS_DIR/$libname"
-            fi
-            # Rewrite the reference in the binary
-            install_name_tool -change "$lib" "@executable_path/../Frameworks/$libname" "$binary" 2>/dev/null || true
-        done
-    }
-
-    echo "Bundling ffmpeg shared libraries..."
-    copy_and_rewrite_deps "$FFMPEG_BIN"
-
-    # Also rewrite id and deps inside each bundled dylib
-    for dylib in "$LIBS_DIR"/*.dylib; do
-        libname=$(basename "$dylib")
-        install_name_tool -id "@executable_path/../Frameworks/$libname" "$dylib" 2>/dev/null || true
-        otool -L "$dylib" | awk '{print $1}' | tail -n +2 | while read -r lib; do
-            case "$lib" in
-                /System/*|/usr/lib/*|@*) continue ;;
-            esac
-            local depname
-            depname=$(basename "$lib")
-            install_name_tool -change "$lib" "@executable_path/../Frameworks/$depname" "$dylib" 2>/dev/null || true
-        done
-    done
-    echo "Bundled $(ls "$LIBS_DIR"/*.dylib 2>/dev/null | wc -l | tr -d ' ') shared libraries"
-
-    # Re-sign all modified binaries (install_name_tool invalidates signatures)
-    echo "Re-signing bundled libraries..."
-    for dylib in "$LIBS_DIR"/*.dylib; do
-        codesign --force --sign - "$dylib"
-    done
-    codesign --force --sign - "$FFMPEG_BIN"
-fi
+# ffmpeg is statically linked into the binary — no external binary or dylibs needed
+# Clean up any old Frameworks directory from previous builds
+rm -rf MXF2PRXY.app/Contents/Frameworks
+rm -f MXF2PRXY.app/Contents/MacOS/ffmpeg
 
 # Copy icon and resources
 cp AppIcon.icns MXF2PRXY.app/Contents/Resources/
