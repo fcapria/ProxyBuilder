@@ -220,6 +220,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var isProcessing: Bool = false
     private var totalClipsQueued: Int = 0
     private var fileRelativePaths: [URL: String] = [:]
+    private var isPremiumUnlocked: Bool {
+        get { UserDefaults.standard.bool(forKey: "isPremiumUnlocked") }
+        set { UserDefaults.standard.set(newValue, forKey: "isPremiumUnlocked") }
+    }
     private var overwriteAllFiles: Bool = false
     private var skipAllExisting: Bool = false
 
@@ -545,8 +549,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         window.contentView = contentView
         window.delegate = self
 
-        // Apply colors after all views are added
-        updateCodecPopup()
+        // Apply colors and premium restrictions after all views are added
+        applyPremiumRestrictions()
         updateModePopup()
         window.makeKeyAndOrderFront(nil)
         updateWindowColors()
@@ -722,7 +726,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         guard let popup = codecPopup else { return }
         popup.removeAllItems()
         let format = currentOutputFormat()
-        let codecs = VideoCodec.codecs(for: format)
+        var codecs = VideoCodec.codecs(for: format)
+        if !isPremiumUnlocked {
+            codecs = codecs.filter { $0 != .proresProxy && $0 != .dnxhrLB }
+        }
         for codec in codecs {
             popup.addItem(withTitle: codec.displayName)
         }
@@ -734,6 +741,46 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             selectedCodecIndex = 0
         }
         popup.selectItem(at: selectedCodecIndex)
+    }
+
+    private func applyPremiumRestrictions() {
+        guard let formatPopup = formatPopup else { return }
+
+        // Rebuild format popup
+        let previousFormat = selectedFormat
+        formatPopup.removeAllItems()
+        if isPremiumUnlocked {
+            formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4", "MXF"])
+        } else {
+            formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4"])
+            // If MXF was selected, reset to QuickTime
+            if previousFormat == 2 {
+                selectedFormat = 0
+                UserDefaults.standard.set(selectedFormat, forKey: "selectedFormatSegment")
+            }
+        }
+        if selectedFormat < formatPopup.numberOfItems {
+            formatPopup.selectItem(at: selectedFormat)
+        }
+
+        // Refresh codec popup
+        updateCodecPopup()
+
+        // Watermark restrictions
+        if isPremiumUnlocked {
+            watermarkCheckbox?.isEnabled = true
+            updateWatermarkSetButtonState()
+        } else {
+            watermarkCheckbox?.state = .on
+            watermarkCheckbox?.isEnabled = false
+            watermarkSetButton?.isEnabled = false
+            UserDefaults.standard.set(true, forKey: "watermarkEnabled")
+            UserDefaults.standard.set("library", forKey: "watermarkMode")
+            UserDefaults.standard.set(bundledWatermarkName, forKey: "watermarkLibraryFile")
+        }
+
+        // Update window title
+        window?.title = isPremiumUnlocked ? "MXF2Prxy Pro" : "MXF2Prxy"
     }
 
     @objc func modePopupChanged(_ sender: NSPopUpButton) {
@@ -1488,10 +1535,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
 
         // Resolve watermark image path based on mode
-        let watermarkEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
-        let watermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "library"
-        let customWatermarkText = UserDefaults.standard.string(forKey: "watermarkCustomText") ?? ""
-        let libraryWatermarkFile = UserDefaults.standard.string(forKey: "watermarkLibraryFile") ?? ""
+        // In free mode, always use bundled watermark
+        let watermarkEnabled: Bool
+        let watermarkMode: String
+        let customWatermarkText: String
+        let libraryWatermarkFile: String
+        if !isPremiumUnlocked {
+            watermarkEnabled = true
+            watermarkMode = "library"
+            customWatermarkText = ""
+            libraryWatermarkFile = bundledWatermarkName
+        } else {
+            watermarkEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
+            watermarkMode = UserDefaults.standard.string(forKey: "watermarkMode") ?? "library"
+            customWatermarkText = UserDefaults.standard.string(forKey: "watermarkCustomText") ?? ""
+            libraryWatermarkFile = UserDefaults.standard.string(forKey: "watermarkLibraryFile") ?? ""
+        }
 
         let watermarkURL: URL?
         if watermarkMode != "custom" && !libraryWatermarkFile.isEmpty {
@@ -3066,6 +3125,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
 
     @objc func showSettings() {
+        // Debug: Option-click gear to toggle premium
+        if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
+            isPremiumUnlocked.toggle()
+            let alert = NSAlert()
+            alert.messageText = isPremiumUnlocked ? "Premium Unlocked" : "Premium Locked"
+            alert.informativeText = isPremiumUnlocked ? "All features are now available." : "Free mode restrictions are now active."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            if let window = self.window {
+                alert.beginSheetModal(for: window)
+            }
+            applyPremiumRestrictions()
+            return
+        }
+
         if settingsWindow == nil {
             guard let mainWindow = window else { return }
             let settingsSize = NSSize(width: 400, height: 260)
