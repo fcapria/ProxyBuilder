@@ -219,6 +219,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var activeJob: URL?
     private var isProcessing: Bool = false
     private var totalClipsQueued: Int = 0
+    private var fileRelativePaths: [URL: String] = [:]
     private var overwriteAllFiles: Bool = false
     private var skipAllExisting: Bool = false
 
@@ -609,12 +610,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         FileManager.default.fileExists(atPath: standardizedURL.path, isDirectory: &isDir)
 
         if isDir.boolValue {
-            // Count MXF/MOV files in folder
-            if let contents = try? FileManager.default.contentsOfDirectory(at: standardizedURL, includingPropertiesForKeys: nil) {
-                let fileCount = contents.filter {
-                    let ext = $0.pathExtension.lowercased()
-                    return ext == "mxf" || ext == "mov"
-                }.count
+            // Count MXF/MOV files in folder (recursive)
+            if let enumerator = FileManager.default.enumerator(at: standardizedURL, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+                var fileCount = 0
+                for case let fileURL as URL in enumerator {
+                    let ext = fileURL.pathExtension.lowercased()
+                    if ext == "mxf" || ext == "mov" {
+                        fileCount += 1
+                    }
+                }
                 totalClipsQueued += fileCount
             }
         } else {
@@ -1333,21 +1337,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 proxyFolderName = "\(folderName) proxies"
                 proxyFolderURL = url.appendingPathComponent(proxyFolderName)
 
-                do {
-                    let contents = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
-                    let ext = { (u: URL) -> String in u.pathExtension.lowercased() }
-                    mxfFiles = contents.filter { ext($0) == "mxf" || ext($0) == "mov" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-                } catch {
-                    print("Error reading folder: \(error)")
-                    completion()
-                    return
+                // Recursively find all MXF/MOV files in folder and sub-folders
+                var relativePaths: [URL: String] = [:]
+                if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+                    for case let fileURL as URL in enumerator {
+                        let ext = fileURL.pathExtension.lowercased()
+                        if ext == "mxf" || ext == "mov" {
+                            mxfFiles.append(fileURL)
+                            // Compute relative subdirectory path from source folder
+                            let parentDir = fileURL.deletingLastPathComponent()
+                            if parentDir.path != url.path {
+                                let relativeSub = parentDir.path.replacingOccurrences(of: url.path + "/", with: "")
+                                relativePaths[fileURL] = relativeSub
+                            }
+                        }
+                    }
                 }
+                mxfFiles.sort { $0.path < $1.path }
+                self.fileRelativePaths = relativePaths
             } else {
                 // It's a file
                 let parentURL = url.deletingLastPathComponent()
                 proxyFolderName = "Proxies"
                 proxyFolderURL = parentURL.appendingPathComponent(proxyFolderName)
                 mxfFiles = [url]
+                self.fileRelativePaths = [:]
             }
 
             // Determine destination based on popup selection
@@ -1413,7 +1427,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         case .mxf:
             outputFileName = mxfFile.deletingPathExtension().lastPathComponent + ".mxf"
         }
-        let outputFileURL = proxyFolderURL.appendingPathComponent(outputFileName)
+        // Determine output directory, preserving sub-folder structure
+        let relativeSub = fileRelativePaths[mxfFile] ?? ""
+        let outputDir = relativeSub.isEmpty ? proxyFolderURL : proxyFolderURL.appendingPathComponent(relativeSub)
+        if !relativeSub.isEmpty {
+            try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        }
+        let outputFileURL = outputDir.appendingPathComponent(outputFileName)
 
         // Initialize log file
         let logURL = proxyFolderURL.appendingPathComponent("conversion_log.txt")
