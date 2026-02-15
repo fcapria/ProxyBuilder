@@ -1,0 +1,14 @@
+prefix=/Users/fcapria/ProxyFactory/ffmpeg-dylib
+exec_prefix=${prefix}
+libdir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/lib
+includedir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/include
+
+Name: libavcodec
+Description: FFmpeg codec library
+Version: 61.19.101
+Requires: 
+Requires.private: libswresample >= 5.3.100, libavutil >= 59.39.100
+Conflicts:
+Libs: -L${libdir}  -lavcodec 
+Libs.private: -L/opt/homebrew/Cellar/libvpx/1.15.2/lib -lvpx -lm -L/opt/homebrew/Cellar/libvpx/1.15.2/lib -lvpx -lm -L/opt/homebrew/Cellar/libvpx/1.15.2/lib -lvpx -lm -L/opt/homebrew/Cellar/libvpx/1.15.2/lib -lvpx -lm -liconv -lm -llzma -lsnappy -lstdc++ -framework AudioToolbox -L/opt/homebrew/Cellar/aom/3.13.1/lib -laom -L/opt/homebrew/Cellar/libvmaf/3.0.0/lib -lvmaf -lmp3lame -lm -L/opt/homebrew/Cellar/opus/1.6.1/lib -lopus -ltheoraenc -ltheoradec -logg -L/opt/homebrew/Cellar/libvorbis/1.3.7/lib -lvorbis -L/opt/homebrew/Cellar/libvorbis/1.3.7/lib -lvorbisenc -pthread -lz -framework VideoToolbox -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework CoreServices
+Cflags: -I${includedir}

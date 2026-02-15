@@ -1,0 +1,14 @@
+prefix=/Users/fcapria/ProxyFactory/ffmpeg-dylib
+exec_prefix=${prefix}
+libdir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/lib
+includedir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 59.39.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil 
+Libs.private: -pthread -lm -framework OpenCL -framework VideoToolbox -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework CoreServices
+Cflags: -I${includedir}

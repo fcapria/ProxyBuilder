@@ -1,0 +1,14 @@
+prefix=/Users/fcapria/ProxyFactory/ffmpeg-dylib
+exec_prefix=${prefix}
+libdir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/lib
+includedir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/include
+
+Name: libavformat
+Description: FFmpeg container format library
+Version: 61.7.100
+Requires: 
+Requires.private: libavcodec >= 61.19.101, libswresample >= 5.3.100, libavutil >= 59.39.100
+Conflicts:
+Libs: -L${libdir}  -lavformat 
+Libs.private: -lm -lbz2 -lz -framework CoreFoundation -framework Security
+Cflags: -I${includedir}

@@ -1,0 +1,34 @@
+{
+  "identifier" : "8835A659",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "F1A2B3C4",
+      "localizations" : [
+        {
+          "description" : "Unlock MXF output, ProRes Proxy, DNxHR LB codecs, and watermark customization.",
+          "displayName" : "MXF2Prxy Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.frankcapria.mxf2prxy.pro",
+      "referenceName" : "MXF2Prxy Pro Upgrade",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "D5E6F7A8",
+    "_developerTeamID" : "G85UV88266"
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

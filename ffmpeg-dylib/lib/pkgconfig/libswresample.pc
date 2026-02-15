@@ -1,0 +1,14 @@
+prefix=/Users/fcapria/ProxyFactory/ffmpeg-dylib
+exec_prefix=${prefix}
+libdir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/lib
+includedir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/include
+
+Name: libswresample
+Description: FFmpeg audio resampling library
+Version: 5.3.100
+Requires: 
+Requires.private: libavutil >= 59.39.100
+Conflicts:
+Libs: -L${libdir}  -lswresample 
+Libs.private: -lm
+Cflags: -I${includedir}

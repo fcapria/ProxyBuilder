@@ -11,4 +11,12 @@ MXF2PRXY.app/
 *.provisionprofile
 *.key
 *.cer
-.DS_Store
+.claude/
+.vscode/
+ffmpeg-build/
+ffmpeg-lgpl/
+ffmpeg-static/
+*.xcodeproj/
+*.zip
+MXF2PRXY safety *.app/
+test_avfoundation.swift

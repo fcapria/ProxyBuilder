@@ -1,7 +1,7 @@
 
 import AppKit
 import AVFoundation
-import CFFmpeg
+import StoreKit
 import UniformTypeIdentifiers
 
 let app = NSApplication.shared
@@ -177,6 +177,95 @@ protocol DropViewDelegate {
 }
 
 @MainActor
+class StoreManager {
+    static let productID = "com.frankcapria.mxf2prxy.pro"
+    private var product: Product?
+    private var updateTask: Task<Void, Never>?
+    var onPurchaseUpdate: ((Bool) -> Void)?
+
+    func fetchProduct() async {
+        do {
+            let products = try await Product.products(for: [StoreManager.productID])
+            product = products.first
+            print("StoreKit: Fetched product: \(product?.displayName ?? "nil") - \(product?.displayPrice ?? "no price")")
+        } catch {
+            print("StoreKit: Failed to fetch products: \(error)")
+        }
+    }
+
+    func purchase() async -> Bool {
+        if product == nil {
+            print("StoreKit: Product not yet fetched, fetching now...")
+            await fetchProduct()
+        }
+        guard let product = product else {
+            print("StoreKit: No product available after fetch")
+            return false
+        }
+        print("StoreKit: Starting purchase for \(product.displayName)")
+        do {
+            let result = try await product.purchase()
+            switch result {
+            case .success(let verification):
+                switch verification {
+                case .verified(let transaction):
+                    await transaction.finish()
+                    print("StoreKit: Purchase verified and finished")
+                    onPurchaseUpdate?(true)
+                    return true
+                case .unverified(let transaction, let error):
+                    await transaction.finish()
+                    print("StoreKit: Purchase unverified (sandbox OK): \(error)")
+                    onPurchaseUpdate?(true)
+                    return true
+                }
+            case .userCancelled:
+                print("StoreKit: User cancelled")
+                return false
+            case .pending:
+                print("StoreKit: Purchase pending")
+                return false
+            @unknown default:
+                print("StoreKit: Unknown result")
+                return false
+            }
+        } catch {
+            print("StoreKit: Purchase failed: \(error)")
+            return false
+        }
+    }
+
+    func checkEntitlement() async -> Bool {
+        for await result in Transaction.currentEntitlements {
+            if let transaction = try? result.payloadValue,
+               transaction.productID == StoreManager.productID,
+               transaction.revocationDate == nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    func listenForTransactions() {
+        updateTask = Task {
+            for await result in Transaction.updates {
+                if let transaction = try? result.payloadValue {
+                    await transaction.finish()
+                    if transaction.productID == StoreManager.productID {
+                        let entitled = transaction.revocationDate == nil
+                        onPurchaseUpdate?(entitled)
+                    }
+                }
+            }
+        }
+    }
+
+    var displayPrice: String {
+        product?.displayPrice ?? "$9.99"
+    }
+}
+
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDelegate {
     var window: NSWindow?
     weak var settingsWindow: NSWindow?
@@ -225,6 +314,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         get { UserDefaults.standard.bool(forKey: "isPremiumUnlocked") }
         set { UserDefaults.standard.set(newValue, forKey: "isPremiumUnlocked") }
     }
+    private var storeManager: StoreManager?
     private var overwriteAllFiles: Bool = false
     private var skipAllExisting: Bool = false
 
@@ -568,9 +658,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         updateModePopup()
         window.makeKeyAndOrderFront(nil)
         updateWindowColors()
+
+        // Initialize StoreKit
+        let store = StoreManager()
+        store.onPurchaseUpdate = { [weak self] entitled in
+            self?.isPremiumUnlocked = entitled
+            self?.applyPremiumRestrictions()
+        }
+        self.storeManager = store
+        Task {
+            await store.fetchProduct()
+            let entitled = await store.checkEntitlement()
+            if entitled && !self.isPremiumUnlocked {
+                self.isPremiumUnlocked = true
+                self.applyPremiumRestrictions()
+            } else if !entitled && self.isPremiumUnlocked {
+                self.isPremiumUnlocked = false
+                self.applyPremiumRestrictions()
+            }
+            store.listenForTransactions()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
+
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         return true
     }
 
@@ -3151,13 +3265,53 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
 
     @objc func showUpgradePrompt() {
+        let price = storeManager?.displayPrice ?? "$9.99"
         let alert = NSAlert()
         alert.messageText = "Upgrade to MXF2Prxy Pro"
-        alert.informativeText = "Unlock MXF output, ProRes Proxy and DNxHR LB codecs, and watermark customization for $9.99."
+        alert.informativeText = "Unlock MXF output, ProRes Proxy and DNxHR LB codecs, and watermark customization for \(price)."
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Not Now")
-        if let window = self.window {
-            alert.beginSheetModal(for: window)
+        alert.addButton(withTitle: "Buy for \(price)")
+        alert.addButton(withTitle: "Restore Purchase")
+        alert.addButton(withTitle: "Cancel")
+        guard let window = self.window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self else { return }
+            if response == .alertFirstButtonReturn {
+                // Buy
+                Task { @MainActor in
+                    print("StoreKit: Buy button tapped, storeManager is \(self.storeManager == nil ? "nil" : "set")")
+                    let success = await self.storeManager?.purchase() ?? false
+                    print("StoreKit: Purchase result: \(success)")
+                    if success {
+                        self.isPremiumUnlocked = true
+                        self.applyPremiumRestrictions()
+                        let done = NSAlert()
+                        done.messageText = "Thank You!"
+                        done.informativeText = "MXF2Prxy Pro has been unlocked."
+                        done.alertStyle = .informational
+                        done.addButton(withTitle: "OK")
+                        await done.beginSheetModal(for: window)
+                    }
+                }
+            } else if response == .alertSecondButtonReturn {
+                // Restore
+                Task { @MainActor in
+                    let entitled = await self.storeManager?.checkEntitlement() ?? false
+                    let done = NSAlert()
+                    if entitled {
+                        self.isPremiumUnlocked = true
+                        self.applyPremiumRestrictions()
+                        done.messageText = "Purchase Restored"
+                        done.informativeText = "MXF2Prxy Pro has been unlocked."
+                    } else {
+                        done.messageText = "No Purchase Found"
+                        done.informativeText = "No previous purchase was found for this Apple ID."
+                    }
+                    done.alertStyle = .informational
+                    done.addButton(withTitle: "OK")
+                    await done.beginSheetModal(for: window)
+                }
+            }
         }
     }
 

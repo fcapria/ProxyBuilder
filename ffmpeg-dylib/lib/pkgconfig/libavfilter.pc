@@ -1,0 +1,14 @@
+prefix=/Users/fcapria/ProxyFactory/ffmpeg-dylib
+exec_prefix=${prefix}
+libdir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/lib
+includedir=/Users/fcapria/ProxyFactory/ffmpeg-dylib/include
+
+Name: libavfilter
+Description: FFmpeg audio/video filtering library
+Version: 10.4.100
+Requires: 
+Requires.private: libswscale >= 8.3.100, libavformat >= 61.7.100, libavcodec >= 61.19.101, libswresample >= 5.3.100, libavutil >= 59.39.100
+Conflicts:
+Libs: -L${libdir}  -lavfilter 
+Libs.private: -framework OpenGL -framework OpenGL -pthread -lm -L/opt/homebrew/Cellar/harfbuzz/12.3.2/lib -lharfbuzz -L/opt/homebrew/Cellar/libass/0.17.4/lib -lass -framework VideoToolbox -framework CoreImage -framework AppKit -framework OpenCL -L/opt/homebrew/Cellar/fontconfig/2.17.1/lib -lfontconfig -L/opt/homebrew/opt/freetype/lib -lfreetype -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework CoreServices
+Cflags: -I${includedir}

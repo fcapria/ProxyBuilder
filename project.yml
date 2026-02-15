@@ -1,0 +1,138 @@
+name: MXF2Prxy
+options:
+  bundleIdPrefix: com.frankcapria
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "16.3"
+
+settings:
+  base:
+    PRODUCT_NAME: MXF2PRXY
+    PRODUCT_BUNDLE_IDENTIFIER: com.frankcapria.mxf2prxy
+    CODE_SIGN_ENTITLEMENTS: MXF2PRXY.entitlements
+    CODE_SIGN_IDENTITY: "Apple Development"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: G85UV88266
+    INFOPLIST_FILE: "$(SRCROOT)/Info.plist"
+    GENERATE_INFOPLIST_FILE: false
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  MXF2PRXY:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/main.swift
+      - path: Sources/CFFmpeg/ffmpeg_wrapper.c
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/BridgingHeader.h"
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/ffmpeg-dylib/include"
+          - "$(SRCROOT)/Sources/CFFmpeg/include"
+        LIBRARY_SEARCH_PATHS:
+          - "$(SRCROOT)/ffmpeg-dylib/lib"
+          - "/opt/homebrew/lib"
+        OTHER_LDFLAGS:
+          - "-lfftools"
+          - "-lavfilter"
+          - "-lavformat"
+          - "-lavcodec"
+          - "-lswresample"
+          - "-lswscale"
+          - "-lavutil"
+          - "-lz"
+          - "-liconv"
+          - "-lxml2"
+          - "-lbz2"
+          - "-llzma"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "@executable_path/../Frameworks"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+    postBuildScripts:
+      - name: "Bundle FFmpeg Dylibs"
+        script: |
+          set +e
+          FRAMEWORKS_DIR="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+          mkdir -p "$FRAMEWORKS_DIR"
+
+          DYLIB_SRC="${SRCROOT}/ffmpeg-dylib/lib"
+
+          # Copy FFmpeg dylibs and create short-name symlinks
+          for dylib in "$DYLIB_SRC"/*.dylib; do
+              [ -L "$dylib" ] && continue
+              name=$(basename "$dylib")
+              cp "$dylib" "$FRAMEWORKS_DIR/$name"
+              install_name_tool -id "@rpath/$name" "$FRAMEWORKS_DIR/$name"
+          done
+
+          # Create short-name symlinks (e.g. libavutil.59.dylib -> libavutil.59.39.100.dylib)
+          for dylib in "$FRAMEWORKS_DIR"/lib*.*.*.*.dylib; do
+              name=$(basename "$dylib")
+              # Extract short name: libavutil.59.39.100.dylib -> libavutil.59.dylib
+              short=$(echo "$name" | sed 's/\([^.]*\.[0-9]*\)\..*/\1.dylib/')
+              if [ "$short" != "$name" ] && [ ! -e "$FRAMEWORKS_DIR/$short" ]; then
+                  ln -s "$name" "$FRAMEWORKS_DIR/$short"
+              fi
+          done
+
+          # Copy Homebrew dependencies needed by FFmpeg dylibs (and their transitive deps)
+          HOMEBREW_DEPS=(
+              /opt/homebrew/opt/libvpx/lib/libvpx.11.dylib
+              /opt/homebrew/opt/aom/lib/libaom.3.dylib
+              /opt/homebrew/opt/libvmaf/lib/libvmaf.3.dylib
+              /opt/homebrew/opt/lame/lib/libmp3lame.0.dylib
+              /opt/homebrew/opt/opus/lib/libopus.0.dylib
+              /opt/homebrew/opt/libvorbis/lib/libvorbis.0.dylib
+              /opt/homebrew/opt/libvorbis/lib/libvorbisenc.2.dylib
+              /opt/homebrew/opt/libogg/lib/libogg.0.dylib
+              /opt/homebrew/opt/theora/lib/libtheoradec.2.dylib
+              /opt/homebrew/opt/theora/lib/libtheoraenc.2.dylib
+              /opt/homebrew/opt/snappy/lib/libsnappy.1.dylib
+              /opt/homebrew/opt/xz/lib/liblzma.5.dylib
+              /opt/homebrew/opt/fontconfig/lib/libfontconfig.1.dylib
+              /opt/homebrew/opt/freetype/lib/libfreetype.6.dylib
+              /opt/homebrew/opt/harfbuzz/lib/libharfbuzz.0.dylib
+              /opt/homebrew/opt/libass/lib/libass.9.dylib
+              /opt/homebrew/opt/gettext/lib/libintl.8.dylib
+              /opt/homebrew/opt/libpng/lib/libpng16.16.dylib
+              /opt/homebrew/opt/glib/lib/libglib-2.0.0.dylib
+              /opt/homebrew/opt/graphite2/lib/libgraphite2.3.dylib
+              /opt/homebrew/opt/fribidi/lib/libfribidi.0.dylib
+              /opt/homebrew/opt/libunibreak/lib/libunibreak.6.dylib
+              /opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib
+          )
+          for dep in "${HOMEBREW_DEPS[@]}"; do
+              if [ -f "$dep" ]; then
+                  name=$(basename "$dep")
+                  cp "$dep" "$FRAMEWORKS_DIR/$name"
+                  install_name_tool -id "@rpath/$name" "$FRAMEWORKS_DIR/$name"
+              fi
+          done
+
+          # Fix ALL references to Homebrew paths in ALL bundled dylibs
+          for dylib in "$FRAMEWORKS_DIR"/*.dylib; do
+              [ -L "$dylib" ] && continue
+              otool -L "$dylib" | grep '/opt/homebrew\|/usr/local' | awk '{print $1}' | while read dep; do
+                  depname=$(basename "$dep")
+                  install_name_tool -change "$dep" "@rpath/$depname" "$dylib" 2>/dev/null
+              done
+          done
+
+          # Code-sign all bundled dylibs
+          for dylib in "$FRAMEWORKS_DIR"/*.dylib; do
+              [ -L "$dylib" ] && continue
+              codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp "$dylib"
+          done
+
+          # Copy resources
+          RESOURCES_DIR="${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+          mkdir -p "$RESOURCES_DIR"
+          cp "${SRCROOT}/AppIcon.icns" "$RESOURCES_DIR/" 2>/dev/null
+          cp "${SRCROOT}/MXF2Prxy-logo.png" "$RESOURCES_DIR/" 2>/dev/null
+          cp "${SRCROOT}/watermark.png" "$RESOURCES_DIR/" 2>/dev/null
+
+          exit 0
+        basedOnDependencyAnalysis: false
