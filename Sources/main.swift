@@ -375,8 +375,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         sizePopup.action = #selector(sizePopupChanged(_:))
         self.sizePopup = sizePopup
 
-        let button = OrangeButton(frame: NSRect(x: 200, y: 200, width: 200, height: 40))
-        button.title = "Select Files or Folders..."
+        let button = OrangeButton(frame: NSRect(x: 170, y: 200, width: 270, height: 40))
+        button.title = "Select Files or Folders to Encode..."
         button.bezelStyle = .rounded
         if #available(macOS 10.14, *) {
             button.contentTintColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) // #ff7c06
@@ -402,7 +402,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         dropView.layer?.addSublayer(borderLayer)
         self.dropBorderLayer = borderLayer
 
-        let dropLabel = NSTextField(labelWithString: "Drag files or folders here")
+        let dropLabel = NSTextField(labelWithString: "Or Drag Files and Folders Here")
         dropLabel.frame = NSRect(x: 0, y: 110, width: 500, height: 30)
         dropLabel.font = NSFont.systemFont(ofSize: 16)
         dropLabel.alignment = .center
