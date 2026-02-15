@@ -205,8 +205,8 @@ cat > MXF2PRXY.app/Contents/Info.plist << PLIST
 </plist>
 PLIST
 
-# Sign the app bundle (after dylibs are already signed)
-codesign --force --sign "$SIGNING_IDENTITY" MXF2PRXY.app
+# Sign the app bundle with sandbox entitlements (after dylibs are already signed)
+codesign --force --sign "$SIGNING_IDENTITY" --entitlements MXF2PRXY.entitlements MXF2PRXY.app
 
 # Update icon cache
 touch MXF2PRXY.app

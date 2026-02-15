@@ -208,6 +208,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var destinationPopup: NSPopUpButton?
     private var destinationLabel: NSTextField?
     private var selectedDestinationURL: URL?
+    private var destinationAccessGranted: Bool = false
     private var dropBorderLayer: CAShapeLayer?
     private var didAutoHalfSize = false
     private var gearButton: NSButton?
@@ -315,13 +316,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         destinationPopup.action = #selector(destinationPopupChanged(_:))
         self.destinationPopup = destinationPopup
 
-        // Restore destination from UserDefaults
+        // Restore destination from security-scoped bookmark
         let savedDestMode = UserDefaults.standard.integer(forKey: "destinationMode")
-        if savedDestMode == 1, let savedPath = UserDefaults.standard.string(forKey: "destinationPath") {
-            let url = URL(fileURLWithPath: savedPath)
-            if FileManager.default.fileExists(atPath: savedPath) {
-                selectedDestinationURL = url
-                destinationPopup.selectItem(at: 1)
+        if savedDestMode == 1, let bookmarkData = UserDefaults.standard.data(forKey: "destinationBookmark") {
+            var isStale = false
+            if let url = try? URL(resolvingBookmarkData: bookmarkData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale) {
+                if isStale {
+                    // Bookmark is stale — re-save if we can still access it
+                    if let newBookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+                        UserDefaults.standard.set(newBookmark, forKey: "destinationBookmark")
+                    }
+                }
+                if url.startAccessingSecurityScopedResource() {
+                    destinationAccessGranted = true
+                    selectedDestinationURL = url
+                    destinationPopup.selectItem(at: 1)
+                }
             }
         }
 
@@ -636,24 +646,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             panel.message = "Choose destination folder for proxies"
 
             if panel.runModal() == .OK, let url = panel.url {
+                // Release previous bookmark access
+                if destinationAccessGranted {
+                    selectedDestinationURL?.stopAccessingSecurityScopedResource()
+                    destinationAccessGranted = false
+                }
+                // Save security-scoped bookmark for sandbox persistence
+                if let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+                    UserDefaults.standard.set(bookmark, forKey: "destinationBookmark")
+                }
                 selectedDestinationURL = url
                 UserDefaults.standard.set(1, forKey: "destinationMode")
-                UserDefaults.standard.set(url.path, forKey: "destinationPath")
                 setEncodingPath("Will encode to", url: url)
             } else {
                 // User cancelled - revert to Default
                 sender.selectItem(at: 0)
+                if destinationAccessGranted {
+                    selectedDestinationURL?.stopAccessingSecurityScopedResource()
+                    destinationAccessGranted = false
+                }
                 selectedDestinationURL = nil
                 UserDefaults.standard.set(0, forKey: "destinationMode")
-                UserDefaults.standard.removeObject(forKey: "destinationPath")
-                clearEncodingPath()
+                UserDefaults.standard.removeObject(forKey: "destinationBookmark")
             }
         } else {
             // "Default" chosen
+            if destinationAccessGranted {
+                selectedDestinationURL?.stopAccessingSecurityScopedResource()
+                destinationAccessGranted = false
+            }
             selectedDestinationURL = nil
             UserDefaults.standard.set(0, forKey: "destinationMode")
-            UserDefaults.standard.removeObject(forKey: "destinationPath")
-            clearEncodingPath()
+            UserDefaults.standard.removeObject(forKey: "destinationBookmark")
         }
     }
 
@@ -1268,11 +1292,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
 
             if isDir.boolValue {
-                // It's a folder - use existing behavior
+                // It's a folder — create proxies subfolder inside it
                 let folderName = url.lastPathComponent
-                let parentURL = url.deletingLastPathComponent()
                 proxyFolderName = "\(folderName) proxies"
-                proxyFolderURL = parentURL.appendingPathComponent(proxyFolderName)
+                proxyFolderURL = url.appendingPathComponent(proxyFolderName)
 
                 do {
                     let contents = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
@@ -1286,7 +1309,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             } else {
                 // It's a file
                 let parentURL = url.deletingLastPathComponent()
-                proxyFolderName = "m2p-proxies"
+                proxyFolderName = "Proxies"
                 proxyFolderURL = parentURL.appendingPathComponent(proxyFolderName)
                 mxfFiles = [url]
             }
