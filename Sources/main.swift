@@ -199,6 +199,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var queueCountLabel: NSTextField?
     private var watermarkCheckbox: NSButton?
     private var watermarkSetButton: NSButton?
+    private var upgradeButton: NSButton?
     private var lutCheckbox: NSButton?
     private var lutLabel: NSTextField?
     private var dropLabel: NSTextField?
@@ -305,6 +306,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         self.formatLabel = formatLabel
 
         let formatPopup = NSPopUpButton(frame: NSRect(x: 325, y: 483, width: 150, height: 26))
+        (formatPopup.cell as? NSPopUpButtonCell)?.autoenablesItems = false
         formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4", "MXF"])
         formatPopup.selectItem(at: selectedFormat)
         formatPopup.target = self
@@ -364,6 +366,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         self.codecLabel = codecLabel
 
         let codecPopup = NSPopUpButton(frame: NSRect(x: 325, y: 389, width: 150, height: 26))
+        (codecPopup.cell as? NSPopUpButtonCell)?.autoenablesItems = false
         codecPopup.target = self
         codecPopup.action = #selector(codecPopupChanged(_:))
         self.codecPopup = codecPopup
@@ -444,6 +447,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             logoView.imageScaling = .scaleProportionallyUpOrDown
             logoView.autoresizingMask = [.maxXMargin, .minYMargin]
             contentView.addSubview(logoView)
+
+            // Upgrade to Pro button (below logo, hidden when premium)
+            let upgradeBtn = NSButton(frame: NSRect(x: 38, y: logoOrigin.y - 36, width: 140, height: 24))
+            upgradeBtn.title = "Upgrade to Pro"
+            upgradeBtn.bezelStyle = .rounded
+            upgradeBtn.target = self
+            upgradeBtn.action = #selector(showUpgradePrompt)
+            upgradeBtn.autoresizingMask = [.maxXMargin, .minYMargin]
+            contentView.addSubview(upgradeBtn)
+            self.upgradeButton = upgradeBtn
         }
         // Gear icon button (bottom right)
         let gearButton = NSButton(frame: NSRect(x: 560, y: 10, width: 24, height: 24))
@@ -550,12 +563,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         window.delegate = self
 
         // Apply colors and premium restrictions after all views are added
+        self.window = window
         applyPremiumRestrictions()
         updateModePopup()
         window.makeKeyAndOrderFront(nil)
         updateWindowColors()
-
-        self.window = window
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -726,19 +738,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         guard let popup = codecPopup else { return }
         popup.removeAllItems()
         let format = currentOutputFormat()
-        var codecs = VideoCodec.codecs(for: format)
-        if !isPremiumUnlocked {
-            codecs = codecs.filter { $0 != .proresProxy && $0 != .dnxhrLB }
-        }
+        let codecs = VideoCodec.codecs(for: format)
         for codec in codecs {
-            popup.addItem(withTitle: codec.displayName)
+            let isPro = !isPremiumUnlocked && (codec == .proresProxy || codec == .dnxhrLB)
+            let title = isPro ? "\(codec.displayName) (Pro)" : codec.displayName
+            popup.addItem(withTitle: title)
+            if isPro {
+                popup.lastItem?.isEnabled = false
+            }
         }
         // Restore saved codec for this format, or default to first
         let savedIndex = UserDefaults.standard.integer(forKey: "selectedCodecIndex_\(selectedFormat)")
-        if savedIndex < codecs.count {
+        if savedIndex < codecs.count && (popup.item(at: savedIndex)?.isEnabled ?? false) {
             selectedCodecIndex = savedIndex
         } else {
+            // Find first enabled item
             selectedCodecIndex = 0
+            for i in 0..<codecs.count {
+                if popup.item(at: i)?.isEnabled ?? false {
+                    selectedCodecIndex = i
+                    break
+                }
+            }
         }
         popup.selectItem(at: selectedCodecIndex)
     }
@@ -749,18 +770,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Rebuild format popup
         let previousFormat = selectedFormat
         formatPopup.removeAllItems()
-        if isPremiumUnlocked {
-            formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4", "MXF"])
-        } else {
-            formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4"])
-            // If MXF was selected, reset to QuickTime
+        formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4", isPremiumUnlocked ? "MXF" : "MXF (Pro)"])
+        if !isPremiumUnlocked {
+            formatPopup.lastItem?.isEnabled = false
             if previousFormat == 2 {
                 selectedFormat = 0
                 UserDefaults.standard.set(selectedFormat, forKey: "selectedFormatSegment")
             }
         }
-        if selectedFormat < formatPopup.numberOfItems {
+        if selectedFormat < formatPopup.numberOfItems && (formatPopup.item(at: selectedFormat)?.isEnabled ?? false) {
             formatPopup.selectItem(at: selectedFormat)
+        } else {
+            formatPopup.selectItem(at: 0)
         }
 
         // Refresh codec popup
@@ -769,18 +790,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Watermark restrictions
         if isPremiumUnlocked {
             watermarkCheckbox?.isEnabled = true
+            watermarkSetButton?.title = "Set…"
             updateWatermarkSetButtonState()
         } else {
             watermarkCheckbox?.state = .on
             watermarkCheckbox?.isEnabled = false
+            watermarkSetButton?.title = "Pro"
             watermarkSetButton?.isEnabled = false
             UserDefaults.standard.set(true, forKey: "watermarkEnabled")
             UserDefaults.standard.set("library", forKey: "watermarkMode")
             UserDefaults.standard.set(bundledWatermarkName, forKey: "watermarkLibraryFile")
         }
 
+        // Upgrade button visibility
+        upgradeButton?.isHidden = isPremiumUnlocked
+
         // Update window title
-        window?.title = isPremiumUnlocked ? "MXF2Prxy Pro" : "MXF2Prxy"
+        window?.title = isPremiumUnlocked ? "MXF2Prxy Pro" : "MXF2Prxy Free"
     }
 
     @objc func modePopupChanged(_ sender: NSPopUpButton) {
@@ -3124,6 +3150,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         self.aboutWindow = aboutWin
     }
 
+    @objc func showUpgradePrompt() {
+        let alert = NSAlert()
+        alert.messageText = "Upgrade to MXF2Prxy Pro"
+        alert.informativeText = "Unlock MXF output, ProRes Proxy and DNxHR LB codecs, and watermark customization for $9.99."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Not Now")
+        if let window = self.window {
+            alert.beginSheetModal(for: window)
+        }
+    }
+
     @objc func showSettings() {
         // Debug: Option-click gear to toggle premium
         if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
@@ -3178,10 +3215,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             let mainLabelColor = formatLabel?.textColor ?? NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
 
             let watermarkButton = NSButton(frame: NSRect(x: 100, y: 220, width: 200, height: 28))
-            watermarkButton.title = "Manage Watermarks"
+            watermarkButton.title = isPremiumUnlocked ? "Manage Watermarks" : "Manage Watermarks (Pro)"
             watermarkButton.bezelStyle = .rounded
             watermarkButton.target = self
             watermarkButton.action = #selector(showWatermarkManagement)
+            watermarkButton.isEnabled = isPremiumUnlocked
             let watermarkButtonAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: mainLabelColor]
             watermarkButton.attributedTitle = NSAttributedString(string: watermarkButton.title, attributes: watermarkButtonAttrs)
 
