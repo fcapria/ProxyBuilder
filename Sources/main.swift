@@ -207,6 +207,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var encodingPathPrefix: String?
     private var destinationPopup: NSPopUpButton?
     private var destinationLabel: NSTextField?
+    private var destinationPathLabel: NSTextField?
     private var selectedDestinationURL: URL?
     private var destinationAccessGranted: Bool = false
     private var dropBorderLayer: CAShapeLayer?
@@ -275,7 +276,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 600, height: 480),
+            contentRect: NSRect(x: 100, y: 100, width: 610, height: 530),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -295,10 +296,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Output format label and popup
         let formatLabel = NSTextField(labelWithString: "Output")
-        formatLabel.frame = NSRect(x: 270, y: 436, width: 50, height: 20)
+        formatLabel.frame = NSRect(x: 270, y: 486, width: 50, height: 20)
         self.formatLabel = formatLabel
 
-        let formatPopup = NSPopUpButton(frame: NSRect(x: 325, y: 433, width: 150, height: 26))
+        let formatPopup = NSPopUpButton(frame: NSRect(x: 325, y: 483, width: 150, height: 26))
         formatPopup.addItems(withTitles: ["QuickTime", "MPEG-4", "MXF"])
         formatPopup.selectItem(at: selectedFormat)
         formatPopup.target = self
@@ -307,22 +308,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Destination label and popup
         let destinationLabel = NSTextField(labelWithString: "Dest.")
-        destinationLabel.frame = NSRect(x: 270, y: 406, width: 50, height: 20)
+        destinationLabel.frame = NSRect(x: 270, y: 453, width: 50, height: 20)
         self.destinationLabel = destinationLabel
 
-        let destinationPopup = NSPopUpButton(frame: NSRect(x: 325, y: 403, width: 150, height: 26))
-        destinationPopup.addItems(withTitles: ["Default", "Select"])
+        let destinationPopup = NSPopUpButton(frame: NSRect(x: 325, y: 450, width: 150, height: 26))
         destinationPopup.target = self
         destinationPopup.action = #selector(destinationPopupChanged(_:))
         self.destinationPopup = destinationPopup
 
-        // Restore destination from security-scoped bookmark
+        // Destination path label (below Dest. row, same style as LUT label)
+        let destinationPathLabel = NSTextField(labelWithString: "")
+        destinationPathLabel.frame = NSRect(x: 270, y: 427, width: 305, height: 16)
+        destinationPathLabel.font = NSFont.systemFont(ofSize: 11)
+        destinationPathLabel.textColor = NSColor.secondaryLabelColor
+        self.destinationPathLabel = destinationPathLabel
+
+        // Restore destination from UserDefaults
         let savedDestMode = UserDefaults.standard.integer(forKey: "destinationMode")
-        if savedDestMode == 1, let bookmarkData = UserDefaults.standard.data(forKey: "destinationBookmark") {
+        if savedDestMode == 1 {
+            // Inside Source Folder
+            destinationPopup.addItems(withTitles: ["Inside Source Folder", "Select..."])
+            destinationPopup.selectItem(at: 0)
+        } else if savedDestMode == 2, let bookmarkData = UserDefaults.standard.data(forKey: "destinationBookmark") {
+            // Custom destination — restore from bookmark
             var isStale = false
             if let url = try? URL(resolvingBookmarkData: bookmarkData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale) {
                 if isStale {
-                    // Bookmark is stale — re-save if we can still access it
                     if let newBookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
                         UserDefaults.standard.set(newBookmark, forKey: "destinationBookmark")
                     }
@@ -330,26 +341,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if url.startAccessingSecurityScopedResource() {
                     destinationAccessGranted = true
                     selectedDestinationURL = url
-                    destinationPopup.selectItem(at: 1)
+                    let path = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+                    destinationPathLabel.stringValue = path
                 }
             }
+            destinationPopup.addItems(withTitles: ["Inside Source Folder", "Select..."])
+            destinationPopup.selectItem(at: 1)
+        } else {
+            // First launch — no destination chosen yet
+            destinationPopup.addItems(withTitles: ["-Choose-", "Inside Source Folder", "Select..."])
+            destinationPopup.selectItem(at: 0)
         }
 
         // Codec label and popup
         let codecLabel = NSTextField(labelWithString: "Codec")
-        codecLabel.frame = NSRect(x: 270, y: 376, width: 50, height: 20)
+        codecLabel.frame = NSRect(x: 270, y: 392, width: 50, height: 20)
         self.codecLabel = codecLabel
 
-        let codecPopup = NSPopUpButton(frame: NSRect(x: 325, y: 373, width: 150, height: 26))
+        let codecPopup = NSPopUpButton(frame: NSRect(x: 325, y: 389, width: 150, height: 26))
         codecPopup.target = self
         codecPopup.action = #selector(codecPopupChanged(_:))
         self.codecPopup = codecPopup
 
         // Size label and popup
         let sizeLabel = NSTextField(labelWithString: "Size")
-        sizeLabel.frame = NSRect(x: 270, y: 346, width: 50, height: 20)
+        sizeLabel.frame = NSRect(x: 270, y: 359, width: 50, height: 20)
 
-        let sizePopup = NSPopUpButton(frame: NSRect(x: 325, y: 343, width: 150, height: 26))
+        let sizePopup = NSPopUpButton(frame: NSRect(x: 325, y: 356, width: 150, height: 26))
         sizePopup.addItems(withTitles: ["Full", "Half"])
         selectedSizeIndex = UserDefaults.standard.integer(forKey: "selectedSizeIndex")
         sizePopup.selectItem(at: selectedSizeIndex)
@@ -415,7 +433,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
               let logoImage = NSImage(contentsOf: logoURL) {
                 let scaledSize = NSSize(width: logoImage.size.width * 0.20, height: logoImage.size.height * 0.20)
             logoImage.size = scaledSize
-                let logoOrigin = NSPoint(x: 10, y: contentView.bounds.height - scaledSize.height - 20)
+                let logoOrigin = NSPoint(x: 38, y: contentView.bounds.height - scaledSize.height - 50)
             let logoView = NSImageView(frame: NSRect(origin: logoOrigin, size: scaledSize))
             logoView.image = logoImage
             logoView.imageScaling = .scaleProportionallyUpOrDown
@@ -443,7 +461,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Watermark checkbox
         let watermarkCheckbox = NSButton(checkboxWithTitle: "Apply watermark", target: self, action: #selector(watermarkCheckboxChanged(_:)))
-        watermarkCheckbox.frame = NSRect(x: 270, y: 316, width: 140, height: 20)
+        watermarkCheckbox.frame = NSRect(x: 270, y: 326, width: 140, height: 20)
         // Default to true on first launch
         if UserDefaults.standard.object(forKey: "watermarkEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "watermarkEnabled")
@@ -459,7 +477,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         watermarkCheckbox.state = UserDefaults.standard.bool(forKey: "watermarkEnabled") ? .on : .off
         self.watermarkCheckbox = watermarkCheckbox
 
-        let watermarkSetButton = NSButton(frame: NSRect(x: 410, y: 313, width: 60, height: 26))
+        let watermarkSetButton = NSButton(frame: NSRect(x: 410, y: 323, width: 60, height: 26))
         watermarkSetButton.title = "Set…"
         watermarkSetButton.bezelStyle = .rounded
         watermarkSetButton.target = self
@@ -470,10 +488,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // LUT checkbox and popup
         let lutCheckbox = NSButton(checkboxWithTitle: "Apply LUT", target: self, action: #selector(lutCheckboxChanged(_:)))
-        lutCheckbox.frame = NSRect(x: 270, y: 286, width: 90, height: 20)
+        lutCheckbox.frame = NSRect(x: 270, y: 293, width: 90, height: 20)
         self.lutCheckbox = lutCheckbox
 
-        let lutPopup = NSPopUpButton(frame: NSRect(x: 360, y: 283, width: 215, height: 26))
+        let lutPopup = NSPopUpButton(frame: NSRect(x: 360, y: 290, width: 215, height: 26))
         lutPopup.target = self
         lutPopup.action = #selector(lutPopupChanged(_:))
         self.lutPopup = lutPopup
@@ -481,7 +499,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // LUT filename label (below LUT row)
         let lutLabel = NSTextField(labelWithString: "")
-        lutLabel.frame = NSRect(x: 270, y: 260, width: 305, height: 16)
+        lutLabel.frame = NSRect(x: 270, y: 267, width: 305, height: 16)
         lutLabel.font = NSFont.systemFont(ofSize: 11)
         lutLabel.textColor = NSColor.secondaryLabelColor
         self.lutLabel = lutLabel
@@ -509,6 +527,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         contentView.addSubview(formatPopup)
         contentView.addSubview(destinationLabel)
         contentView.addSubview(destinationPopup)
+        contentView.addSubview(destinationPathLabel)
         contentView.addSubview(codecLabel)
         contentView.addSubview(codecPopup)
         contentView.addSubview(sizeLabel)
@@ -530,11 +549,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         updateModePopup()
         window.makeKeyAndOrderFront(nil)
         updateWindowColors()
-
-        // Show saved destination path on launch
-        if let destURL = selectedDestinationURL {
-            setEncodingPath("Will encode to", url: destURL)
-        }
 
         self.window = window
     }
@@ -635,8 +649,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
 
     @objc func destinationPopupChanged(_ sender: NSPopUpButton) {
-        if sender.indexOfSelectedItem == 1 {
-            // "Select" chosen - open folder picker
+        guard let selectedTitle = sender.titleOfSelectedItem else { return }
+
+        // Remove the "-Choose-" placeholder if it's still present
+        if sender.itemTitles.contains("-Choose-") && selectedTitle != "-Choose-" {
+            sender.removeItem(withTitle: "-Choose-")
+        }
+
+        if selectedTitle == "Select..." {
+            // Open folder picker for custom destination
             let panel = NSOpenPanel()
             panel.canChooseFiles = false
             panel.canChooseDirectories = true
@@ -656,29 +677,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     UserDefaults.standard.set(bookmark, forKey: "destinationBookmark")
                 }
                 selectedDestinationURL = url
-                UserDefaults.standard.set(1, forKey: "destinationMode")
-                setEncodingPath("Will encode to", url: url)
+                UserDefaults.standard.set(2, forKey: "destinationMode")
+                let path = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+                destinationPathLabel?.stringValue = path
+                updateDestinationPathLabelColor()
             } else {
-                // User cancelled - revert to Default
-                sender.selectItem(at: 0)
-                if destinationAccessGranted {
-                    selectedDestinationURL?.stopAccessingSecurityScopedResource()
-                    destinationAccessGranted = false
+                // User cancelled — revert to previous selection
+                let currentMode = UserDefaults.standard.integer(forKey: "destinationMode")
+                if currentMode == 1 {
+                    sender.selectItem(withTitle: "Inside Source Folder")
+                } else if currentMode == 2 {
+                    sender.selectItem(withTitle: "Select...")
+                } else {
+                    // No prior choice — re-add placeholder
+                    if !sender.itemTitles.contains("-Choose-") {
+                        sender.insertItem(withTitle: "-Choose-", at: 0)
+                    }
+                    sender.selectItem(withTitle: "-Choose-")
                 }
-                selectedDestinationURL = nil
-                UserDefaults.standard.set(0, forKey: "destinationMode")
-                UserDefaults.standard.removeObject(forKey: "destinationBookmark")
             }
-        } else {
-            // "Default" chosen
+        } else if selectedTitle == "Inside Source Folder" {
             if destinationAccessGranted {
                 selectedDestinationURL?.stopAccessingSecurityScopedResource()
                 destinationAccessGranted = false
             }
             selectedDestinationURL = nil
-            UserDefaults.standard.set(0, forKey: "destinationMode")
+            UserDefaults.standard.set(1, forKey: "destinationMode")
             UserDefaults.standard.removeObject(forKey: "destinationBookmark")
+            destinationPathLabel?.stringValue = ""
         }
+    }
+
+    private func updateDestinationPathLabelColor() {
+        guard let label = destinationPathLabel, !label.stringValue.isEmpty else { return }
+        let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
+        label.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
     }
 
     private func updateCodecPopup() {
@@ -1081,6 +1114,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         if let label = lutLabel, !label.stringValue.isEmpty {
             label.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
         }
+
+        // Update destination path label color
+        updateDestinationPathLabelColor()
 
         updateDropViewColor()
     }
@@ -2067,6 +2103,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     // Start the next job if we're not already processing
     private func startNextJobIfNeeded() {
         guard !isProcessing, !jobQueue.isEmpty else { return }
+        let destMode = UserDefaults.standard.integer(forKey: "destinationMode")
+        if destMode == 0 {
+            let alert = NSAlert()
+            alert.messageText = "No Destination Selected"
+            alert.informativeText = "Please choose a destination from the Dest. menu before encoding."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            if let window = self.window {
+                alert.beginSheetModal(for: window)
+            }
+            jobQueue.removeAll()
+            totalClipsQueued = 0
+            updateDropZoneAvailability()
+            return
+        }
         let next = jobQueue.removeFirst()
         activeJob = next
         isProcessing = true
@@ -2076,13 +2127,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 guard let self = self else { return }
                 self.isProcessing = false
                 self.activeJob = nil
-                // Continue with remaining jobs, or restore idle state
-                if self.jobQueue.isEmpty {
-                    if let destURL = self.selectedDestinationURL {
-                        self.setEncodingPath("Will encode to", url: destURL)
-                    }
-                    // Otherwise keep "Encoded to" path visible
-                }
+                // Continue with remaining jobs
                 self.startNextJobIfNeeded()
             }
         }
