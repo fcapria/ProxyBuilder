@@ -8,4 +8,7 @@ DerivedData/
 .netrc
 build/
 MXF2PRXY.app/
+*.provisionprofile
+*.key
+*.cer
 .DS_Store

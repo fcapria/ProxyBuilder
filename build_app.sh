@@ -2,7 +2,7 @@
 set -e
 
 DYLIB_SRC="$(pwd)/ffmpeg-dylib/lib"
-SIGNING_IDENTITY="-"  # Ad-hoc; change for distribution
+SIGNING_IDENTITY="3rd Party Mac Developer Application: Francis Capria (G85UV88266)"
 
 # Quit the app if it's running
 if pgrep -x "MXF2PRXY" > /dev/null; then
@@ -161,6 +161,9 @@ cp AppIcon.icns MXF2PRXY.app/Contents/Resources/
 cp -f MXF2Prxy-logo.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
 cp -f watermark.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
 
+# Embed provisioning profile
+cp MXF2PRXY_App_Store.provisionprofile MXF2PRXY.app/Contents/embedded.provisionprofile
+
 # Bundle LGPL source materials (build script + patches for reproducible FFmpeg build)
 LGPL_DIR="MXF2PRXY.app/Contents/Resources/LGPL-Sources"
 mkdir -p "$LGPL_DIR"
@@ -188,7 +191,7 @@ cat > MXF2PRXY.app/Contents/Info.plist << PLIST
 	<key>CFBundleExecutable</key>
 	<string>MXF2PRXY</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.example.mxf2prxy</string>
+	<string>com.frankcapria.mxf2prxy</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
