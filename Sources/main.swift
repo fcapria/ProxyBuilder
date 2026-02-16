@@ -187,22 +187,22 @@ class StoreManager {
         do {
             let products = try await Product.products(for: [StoreManager.productID])
             product = products.first
-            print("StoreKit: Fetched product: \(product?.displayName ?? "nil") - \(product?.displayPrice ?? "no price")")
+
         } catch {
-            print("StoreKit: Failed to fetch products: \(error)")
+
         }
     }
 
     func purchase() async -> Bool {
         if product == nil {
-            print("StoreKit: Product not yet fetched, fetching now...")
+
             await fetchProduct()
         }
         guard let product = product else {
-            print("StoreKit: No product available after fetch")
+
             return false
         }
-        print("StoreKit: Starting purchase for \(product.displayName)")
+
         do {
             let result = try await product.purchase()
             switch result {
@@ -210,27 +210,27 @@ class StoreManager {
                 switch verification {
                 case .verified(let transaction):
                     await transaction.finish()
-                    print("StoreKit: Purchase verified and finished")
+
                     onPurchaseUpdate?(true)
                     return true
-                case .unverified(let transaction, let error):
+                case .unverified(let transaction, _):
                     await transaction.finish()
-                    print("StoreKit: Purchase unverified (sandbox OK): \(error)")
+
                     onPurchaseUpdate?(true)
                     return true
                 }
             case .userCancelled:
-                print("StoreKit: User cancelled")
+
                 return false
             case .pending:
-                print("StoreKit: Purchase pending")
+
                 return false
             @unknown default:
-                print("StoreKit: Unknown result")
+
                 return false
             }
         } catch {
-            print("StoreKit: Purchase failed: \(error)")
+
             return false
         }
     }
@@ -1518,6 +1518,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             var isDir: ObjCBool = false
             FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
 
+            var relativePaths: [URL: String] = [:]
+
             if isDir.boolValue {
                 // It's a folder — create proxies subfolder inside it
                 let folderName = url.lastPathComponent
@@ -1525,7 +1527,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 proxyFolderURL = url.appendingPathComponent(proxyFolderName)
 
                 // Recursively find all MXF/MOV files in folder and sub-folders
-                var relativePaths: [URL: String] = [:]
                 if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
                     for case let fileURL as URL in enumerator {
                         let ext = fileURL.pathExtension.lowercased()
@@ -1541,21 +1542,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     }
                 }
                 mxfFiles.sort { $0.path < $1.path }
-                self.fileRelativePaths = relativePaths
             } else {
                 // It's a file
                 let parentURL = url.deletingLastPathComponent()
                 proxyFolderName = "Proxies"
                 proxyFolderURL = parentURL.appendingPathComponent(proxyFolderName)
                 mxfFiles = [url]
-                self.fileRelativePaths = [:]
+                relativePaths = [:]
             }
 
             // Determine destination based on popup selection
             let finalMxfFiles = mxfFiles
+            let finalRelativePaths = relativePaths
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
+                self.fileRelativePaths = finalRelativePaths
 
                 var destinationURL = proxyFolderURL
 
@@ -2277,10 +2279,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let logFD = logHandle?.fileDescriptor ?? -1
 
         let fullArgs = ["ffmpeg"] + arguments
-        nonisolated(unsafe) let args = fullArgs
-        nonisolated(unsafe) let fd = logFD
-        nonisolated(unsafe) let handle = logHandle
-        nonisolated(unsafe) let done = completion
+        let args = fullArgs
+        let fd = logFD
+        let handle = logHandle
+        let done = completion
 
         DispatchQueue.global(qos: .userInitiated).async {
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
@@ -3279,9 +3281,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             if response == .alertFirstButtonReturn {
                 // Buy
                 Task { @MainActor in
-                    print("StoreKit: Buy button tapped, storeManager is \(self.storeManager == nil ? "nil" : "set")")
+
                     let success = await self.storeManager?.purchase() ?? false
-                    print("StoreKit: Purchase result: \(success)")
+
                     if success {
                         self.isPremiumUnlocked = true
                         self.applyPremiumRestrictions()
@@ -3478,8 +3480,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         exportSession.outputURL = outputURL
         exportSession.outputFileType = .mov
         
-        nonisolated(unsafe) let session = exportSession
-        nonisolated(unsafe) let done = completion
+        let session = exportSession
+        let done = completion
         session.exportAsynchronously {
             DispatchQueue.main.async { [weak self] in
                 let success = session.status == .completed

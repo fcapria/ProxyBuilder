@@ -7,6 +7,7 @@ options:
 
 settings:
   base:
+    ARCHS: arm64
     PRODUCT_NAME: MXF2PRXY
     PRODUCT_BUNDLE_IDENTIFIER: com.frankcapria.mxf2prxy
     CODE_SIGN_ENTITLEMENTS: MXF2PRXY.entitlements
@@ -25,8 +26,11 @@ targets:
     sources:
       - path: Sources/main.swift
       - path: Sources/CFFmpeg/ffmpeg_wrapper.c
+      - path: Assets.xcassets
     settings:
       base:
+        ARCHS: arm64
+        EXCLUDED_ARCHS: x86_64
         SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/BridgingHeader.h"
         HEADER_SEARCH_PATHS:
           - "$(SRCROOT)/ffmpeg-dylib/include"
@@ -121,6 +125,9 @@ targets:
               done
           done
 
+          # Strip quarantine attributes from all bundled dylibs
+          xattr -cr "$FRAMEWORKS_DIR"
+
           # Code-sign all bundled dylibs
           for dylib in "$FRAMEWORKS_DIR"/*.dylib; do
               [ -L "$dylib" ] && continue
@@ -133,6 +140,9 @@ targets:
           cp "${SRCROOT}/AppIcon.icns" "$RESOURCES_DIR/" 2>/dev/null
           cp "${SRCROOT}/MXF2Prxy-logo.png" "$RESOURCES_DIR/" 2>/dev/null
           cp "${SRCROOT}/watermark.png" "$RESOURCES_DIR/" 2>/dev/null
+
+          # Strip quarantine attributes from all resources
+          xattr -cr "$RESOURCES_DIR"
 
           exit 0
         basedOnDependencyAnalysis: false
