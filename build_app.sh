@@ -5,9 +5,9 @@ DYLIB_SRC="$(pwd)/ffmpeg-dylib/lib"
 SIGNING_IDENTITY="3rd Party Mac Developer Application: Francis Capria (G85UV88266)"
 
 # Quit the app if it's running
-if pgrep -x "MXF2PRXY" > /dev/null; then
-    echo "Quitting running instance of MXF2PRXY..."
-    killall MXF2PRXY 2>/dev/null || true
+if pgrep -x "pxf" > /dev/null; then
+    echo "Quitting running instance of pxf..."
+    killall pxf 2>/dev/null || true
     sleep 0.5
 fi
 
@@ -15,12 +15,12 @@ fi
 swift build
 
 # Create app bundle structure
-mkdir -p MXF2PRXY.app/Contents/MacOS
-mkdir -p MXF2PRXY.app/Contents/Resources
-mkdir -p MXF2PRXY.app/Contents/Frameworks
+mkdir -p pxf.app/Contents/MacOS
+mkdir -p pxf.app/Contents/Resources
+mkdir -p pxf.app/Contents/Frameworks
 
 # Copy binary
-cp .build/debug/MXFToQuickTime MXF2PRXY.app/Contents/MacOS/MXF2PRXY
+cp .build/debug/pxf pxf.app/Contents/MacOS/pxf
 
 # =============================================================================
 # Bundle all non-system dylibs into Contents/Frameworks/
@@ -29,7 +29,7 @@ cp .build/debug/MXFToQuickTime MXF2PRXY.app/Contents/MacOS/MXF2PRXY
 # =============================================================================
 echo "=== Bundling shared libraries ==="
 
-FRAMEWORKS="MXF2PRXY.app/Contents/Frameworks"
+FRAMEWORKS="pxf.app/Contents/Frameworks"
 rm -rf "$FRAMEWORKS"
 mkdir -p "$FRAMEWORKS"
 
@@ -127,7 +127,7 @@ done
 # Also ensure the main binary's Homebrew references are rewritten to @rpath
 echo ""
 echo "=== Fixing main binary references ==="
-MAIN_BIN="MXF2PRXY.app/Contents/MacOS/MXF2PRXY"
+MAIN_BIN="pxf.app/Contents/MacOS/pxf"
 otool -L "$MAIN_BIN" | awk '{print $1}' | tail -n +2 | while read -r dep; do
     case "$dep" in
         /System/*|/usr/lib/*|@rpath/*|@executable_path/*) continue ;;
@@ -135,7 +135,7 @@ otool -L "$MAIN_BIN" | awk '{print $1}' | tail -n +2 | while read -r dep; do
     dep_name=$(basename "$dep")
     if [ -f "$FRAMEWORKS/$dep_name" ]; then
         install_name_tool -change "$dep" "@rpath/$dep_name" "$MAIN_BIN"
-        echo "  Fixed: MXF2PRXY → @rpath/$dep_name"
+        echo "  Fixed: pxf → @rpath/$dep_name"
     fi
 done
 
@@ -157,15 +157,15 @@ done
 echo "  Signed $(ls "$FRAMEWORKS"/*.dylib 2>/dev/null | wc -l | tr -d ' ') dylibs"
 
 # Copy icon and resources
-cp AppIcon.icns MXF2PRXY.app/Contents/Resources/
-cp -f MXF2Prxy-logo.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
-cp -f watermark.png MXF2PRXY.app/Contents/Resources/ 2>/dev/null || true
+cp AppIcon.icns pxf.app/Contents/Resources/
+cp -f pfx_only.png pxf.app/Contents/Resources/ 2>/dev/null || true
+cp -f watermark.png pxf.app/Contents/Resources/ 2>/dev/null || true
 
 # Embed provisioning profile
-cp MXF2PRXY_App_Store.provisionprofile MXF2PRXY.app/Contents/embedded.provisionprofile
+cp pxf_App_Store.provisionprofile pxf.app/Contents/embedded.provisionprofile
 
 # Bundle LGPL source materials (build script + patches for reproducible FFmpeg build)
-LGPL_DIR="MXF2PRXY.app/Contents/Resources/LGPL-Sources"
+LGPL_DIR="pxf.app/Contents/Resources/LGPL-Sources"
 mkdir -p "$LGPL_DIR"
 cp build_ffmpeg_dylib.sh "$LGPL_DIR/"
 cp -R patches/ "$LGPL_DIR/patches/" 2>/dev/null || true
@@ -174,14 +174,14 @@ echo "  Bundled LGPL source materials in Resources/LGPL-Sources/"
 
 # Auto-increment build number
 CURRENT_BUILD=0
-if [ -f MXF2PRXY.app/Contents/Info.plist ]; then
-    CURRENT_BUILD=$(defaults read "$(pwd)/MXF2PRXY.app/Contents/Info.plist" CFBundleVersion 2>/dev/null || echo 0)
+if [ -f pxf.app/Contents/Info.plist ]; then
+    CURRENT_BUILD=$(defaults read "$(pwd)/pxf.app/Contents/Info.plist" CFBundleVersion 2>/dev/null || echo 0)
 fi
 NEW_BUILD=$((CURRENT_BUILD + 1))
 echo "Build number: $NEW_BUILD"
 
 # Create Info.plist
-cat > MXF2PRXY.app/Contents/Info.plist << PLIST
+cat > pxf.app/Contents/Info.plist << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -189,13 +189,13 @@ cat > MXF2PRXY.app/Contents/Info.plist << PLIST
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>MXF2PRXY</string>
+	<string>pxf</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.frankcapria.mxf2prxy</string>
+	<string>com.frankcapria.pxf</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>MXF2PRXY</string>
+	<string>pxf</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -209,10 +209,10 @@ cat > MXF2PRXY.app/Contents/Info.plist << PLIST
 PLIST
 
 # Sign the app bundle with sandbox entitlements (after dylibs are already signed)
-codesign --force --sign "$SIGNING_IDENTITY" --entitlements MXF2PRXY.entitlements MXF2PRXY.app
+codesign --force --sign "$SIGNING_IDENTITY" --entitlements pxf.entitlements pxf.app
 
 # Update icon cache
-touch MXF2PRXY.app
+touch pxf.app
 
 # =============================================================================
 # Verification
@@ -244,11 +244,11 @@ ls -lh "$FRAMEWORKS"/*.dylib | awk '{print $5, $NF}'
 
 echo ""
 echo "--- Code signature ---"
-codesign -vvv MXF2PRXY.app 2>&1 | head -5
+codesign -vvv pxf.app 2>&1 | head -5
 
 echo ""
 echo "App built successfully"
 
 # Launch the app
-echo "Launching MXF2PRXY..."
-open MXF2PRXY.app
+echo "Launching pxf..."
+open pxf.app

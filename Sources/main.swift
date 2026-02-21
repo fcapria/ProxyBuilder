@@ -17,7 +17,7 @@ MainActor.assumeIsolated {
 _ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv)
 
 class OrangeButton: NSButton {
-    let orangeColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0)
+    let orangeColor = NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0)
     private var isMouseDown = false
     
     override func awakeFromNib() {
@@ -178,7 +178,7 @@ protocol DropViewDelegate {
 
 @MainActor
 class StoreManager {
-    static let productID = "com.frankcapria.mxf2prxy.pro"
+    static let productID = "com.frankcapria.pxf.pro"
     private var product: Product?
     private var updateTask: Task<Void, Never>?
     var onPurchaseUpdate: ((Bool) -> Void)?
@@ -187,7 +187,6 @@ class StoreManager {
         do {
             let products = try await Product.products(for: [StoreManager.productID])
             product = products.first
-
         } catch {
 
         }
@@ -378,7 +377,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             defer: false
         )
 
-        window.title = "MXF2Prxy"
+        window.title = "pxf"
         window.titlebarAppearsTransparent = true
         window.isRestorable = false
 
@@ -477,7 +476,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         button.title = "Select Files or Folders to Encode..."
         button.bezelStyle = .rounded
         if #available(macOS 10.14, *) {
-            button.contentTintColor = NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) // #ff7c06
+            button.contentTintColor = NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) // #ff7c06
         }
         button.target = self
         button.action = #selector(selectFolder)
@@ -500,9 +499,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         dropView.layer?.addSublayer(borderLayer)
         self.dropBorderLayer = borderLayer
 
-        let dropLabel = NSTextField(labelWithString: "Or Drag Files and Folders Here")
+        let dropLabel = NSTextField(labelWithString: "...Or Drag Files and Folders Here")
         dropLabel.frame = NSRect(x: 0, y: 110, width: 500, height: 30)
-        dropLabel.font = NSFont.systemFont(ofSize: 16)
+        dropLabel.font = NSFont.systemFont(ofSize: 13)
         dropLabel.alignment = .center
         dropView.addSubview(dropLabel)
         self.dropLabel = dropLabel
@@ -527,7 +526,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         
         let contentView = NSView()
         contentView.wantsLayer = true
-          if let logoURL = Bundle.main.url(forResource: "MXF2Prxy-logo", withExtension: "png"),
+          if let logoURL = Bundle.main.url(forResource: "pfx_only", withExtension: "png"),
               let logoImage = NSImage(contentsOf: logoURL) {
                 let scaledSize = NSSize(width: logoImage.size.width * 0.20, height: logoImage.size.height * 0.20)
             logoImage.size = scaledSize
@@ -539,7 +538,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             contentView.addSubview(logoView)
 
             // Upgrade to Pro button (below logo, hidden when premium)
-            let upgradeBtn = NSButton(frame: NSRect(x: 38, y: logoOrigin.y - 36, width: 140, height: 24))
+            let upgradeBtn = NSButton(frame: NSRect(x: 68, y: logoOrigin.y - 2, width: 140, height: 24))
             upgradeBtn.title = "Upgrade to Pro"
             upgradeBtn.bezelStyle = .rounded
             upgradeBtn.target = self
@@ -845,7 +844,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private func updateDestinationPathLabelColor() {
         guard let label = destinationPathLabel, !label.stringValue.isEmpty else { return }
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-        label.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        label.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
     }
 
     private func updateCodecPopup() {
@@ -920,7 +919,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         upgradeButton?.isHidden = isPremiumUnlocked
 
         // Update window title
-        window?.title = isPremiumUnlocked ? "MXF2Prxy Pro" : "MXF2Prxy Free"
+        window?.title = isPremiumUnlocked ? "pxf Pro" : "pxf Free"
     }
 
     @objc func modePopupChanged(_ sender: NSPopUpButton) {
@@ -946,7 +945,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         guard let label = encodingPathLabel else { return }
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
-        let linkColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        let linkColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
 
@@ -996,7 +995,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                FileManager.default.fileExists(atPath: getLUTDirectoryURL().appendingPathComponent(savedLUT).path) {
                 lutLabel?.stringValue = savedLUT
                 let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-                lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+                lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
             }
         } else {
             lutLabel?.stringValue = ""
@@ -1021,7 +1020,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             // Update LUT label
             lutLabel?.stringValue = selectedTitle
             let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-            lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+            lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
         }
     }
 
@@ -1090,7 +1089,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 // Update LUT label
                 self.lutLabel?.stringValue = url.lastPathComponent
                 let isDark = self.currentMode == .auto ? self.isSystemDarkAppearance() : (self.currentMode == .night)
-                self.lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+                self.lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
 
                 // Refresh LUT management window if it's open
                 if self.lutManagementWindow != nil {
@@ -1098,7 +1097,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     self.selectLUT()
                 }
             } catch {
-                self.appendLog(logURL: URL(fileURLWithPath: "/tmp/mxf2prxy.log"), entry: "Failed to copy LUT: \(error)\n")
+                self.appendLog(logURL: URL(fileURLWithPath: "/tmp/pxf.log"), entry: "Failed to copy LUT: \(error)\n")
             }
         }
     }
@@ -1110,7 +1109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private func getLUTDirectoryURL() -> URL {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let lutDir = appSupport.appendingPathComponent("MXF2Prxy").appendingPathComponent("LUTs")
+        let lutDir = appSupport.appendingPathComponent("pxf").appendingPathComponent("LUTs")
         
         if !fileManager.fileExists(atPath: lutDir.path) {
             try? fileManager.createDirectory(at: lutDir, withIntermediateDirectories: true)
@@ -1156,7 +1155,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         lutCheckbox?.state = .on
         lutLabel?.stringValue = lutFilename
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-        lutLabel?.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
         // No need to repopulate menu; it will be rebuilt next time
     }
     
@@ -1173,12 +1172,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             .sorted()
     }
 
-    private let bundledWatermarkName = "MXF2Prxy.png"
+    private let bundledWatermarkName = "pxf.png"
 
     private func getWatermarkDirectoryURL() -> URL {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let wmDir = appSupport.appendingPathComponent("MXF2Prxy").appendingPathComponent("Watermarks")
+        let wmDir = appSupport.appendingPathComponent("pxf").appendingPathComponent("Watermarks")
 
         if !fileManager.fileExists(atPath: wmDir.path) {
             try? fileManager.createDirectory(at: wmDir, withIntermediateDirectories: true)
@@ -1187,7 +1186,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Ensure bundled watermark is always present in the library
         let bundledDest = wmDir.appendingPathComponent(bundledWatermarkName)
         if !fileManager.fileExists(atPath: bundledDest.path) {
-            if let bundledURL = Bundle.main.resourceURL?.appendingPathComponent("watermark.png") {
+            if let bundledURL = Bundle.main.resourceURL?.appendingPathComponent(bundledWatermarkName) {
                 try? fileManager.copyItem(at: bundledURL, to: bundledDest)
             }
         }
@@ -1259,12 +1258,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         destinationLabel?.textColor = textColor
         codecLabel?.textColor = textColor
 
-        // Update queue count label color - green in dark mode
-        let queueCountColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : textColor // #68dd6d in dark mode
+        // Update queue count label color - orange in both modes
+        let queueCountColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
         queueCountLabel?.textColor = queueCountColor
 
         // Update button appearance
-        let accentColor = isDark ? NSColor(red: 1.0, green: 0.486, blue: 0.024, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        let accentColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
         if #available(macOS 10.14, *) {
             button?.contentTintColor = accentColor
         }
@@ -1301,9 +1300,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             checkbox.attributedTitle = NSAttributedString(string: checkbox.title, attributes: checkboxAttrs)
         }
 
-        // Update LUT label color - green in dark mode, blue in light mode (when LUT is selected)
+        // Update LUT label color - orange in dark mode, blue in light mode (when LUT is selected)
         if let label = lutLabel, !label.stringValue.isEmpty {
-            label.textColor = isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+            label.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
         }
 
         // Update destination path label color
@@ -1529,6 +1528,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 // Recursively find all MXF/MOV files in folder and sub-folders
                 if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
                     for case let fileURL as URL in enumerator {
+                        // Skip anything inside the proxy output folder to avoid re-encoding proxies
+                        if fileURL.path.hasPrefix(proxyFolderURL.path + "/") {
+                            enumerator.skipDescendants()
+                            continue
+                        }
                         let ext = fileURL.pathExtension.lowercased()
                         if ext == "mxf" || ext == "mov" {
                             mxfFiles.append(fileURL)
@@ -1656,7 +1660,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                             self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
                         case .overwriteAll:
                             self.overwriteAllFiles = true
-                            self.continueProcessing(index: index, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, outputFileURL: outputFileURL, shouldOverwrite: true, completion: completion)
+                            // Wipe the proxy folder so no stale files remain, then restart from the beginning
+                            try? FileManager.default.removeItem(at: proxyFolderURL)
+                            try? FileManager.default.createDirectory(at: proxyFolderURL, withIntermediateDirectories: true)
+                            self.processNextFile(index: 0, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, forceOverwrite: true, completion: completion)
                         case .skipAll:
                             self.skipAllExisting = true
                             self.appendLog(logURL: logURL, entry: "SKIPPED (already exists): \(mxfFile.lastPathComponent)\n\n")
@@ -1782,18 +1789,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
         let videoScaleExpr = isHalfSize ? "trunc(iw/4)*2:trunc(ih/4)*2" : "-1:-1"
         let scalePrefix = isHalfSize ? "scale=trunc(iw/4)*2:trunc(ih/4)*2:flags=bicubic:out_color_matrix=bt709," : ""
+        let wmPadX = 30
+        let wmPadY = 30
         let sizeDiv = isHalfSize ? 2 : 1
-        let wmHeight = max(videoHeight * 15 / 100 / sizeDiv, 160 / sizeDiv)
-        let wmPadX = videoWidth * 5 / 100 / sizeDiv
-        let wmPadY = videoHeight * 5 / 100 / sizeDiv
+        let wmHeight = max(videoHeight * 15 / 100 / sizeDiv, 1)
         // Anamorphic correction: scale to target height preserving AR, then squeeze width
-        var wmScaleFilter = "scale=-1:\(wmHeight)"
+        var wmScaleFilter = "scale=-2:\(wmHeight)"
         if videoWidth > 0 && videoHeight > 0 && darNum > 0 && darDen > 0 {
             let rasterAR = Double(videoWidth) / Double(videoHeight)
             let dar = Double(darNum) / Double(darDen)
             let squeeze = rasterAR / dar
             if abs(squeeze - 1.0) > 0.01 {
-                wmScaleFilter = "scale=-1:\(wmHeight),scale=iw*\(squeeze):ih"
+                wmScaleFilter = "scale=-2:\(wmHeight),scale=trunc(iw*\(squeeze)/2)*2:ih"
             }
         }
         appendLog(logURL: logURL, entry: "Detected video width: \(videoWidth), height: \(videoHeight), DAR: \(darNum):\(darDen), wmScaleFilter: \(wmScaleFilter), wmHeight: \(wmHeight)\n")
@@ -1879,7 +1886,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                             if hasLUT {
                                 filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                             }
-                            filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                            filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.15[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                             args = [
                                 "-i", intermediateURL.path,
@@ -1996,7 +2003,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     if hasLUT {
                         filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
-                    filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                    filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.15[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                     videoFilterArgs = ["-filter_complex", filterChain]
                     videoMapArgs = ["-map", "[v]"]
@@ -2074,7 +2081,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.15[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
             } else if hasCustomTextWatermark {
@@ -2146,7 +2153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 if hasLUT {
                     filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                 }
-                filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.5[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
+                filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.15[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
 
                 videoFilterArgs = ["-filter_complex", filterChain]
                 videoMapArgs = ["-map", "[v]"]
@@ -2794,7 +2801,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 nameButton.isBordered = false
                 let isSelected = wmName == currentLibraryFile
                 let nameColor: NSColor = isSelected
-                    ? (isDark ? NSColor(red: 0.408, green: 0.867, blue: 0.427, alpha: 1.0) : NSColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0))
+                    ? (isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0))
                     : (isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0))
                 nameButton.font = NSFont.systemFont(ofSize: 12)
                 let nameAttrs: [NSAttributedString.Key: Any] = [
@@ -3110,7 +3117,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let mainMenu = NSMenu()
         let appMenu = NSMenu()
 
-        let aboutItem = NSMenuItem(title: "About MXF2PRXY", action: #selector(showAbout), keyEquivalent: "")
+        let aboutItem = NSMenuItem(title: "About pxf", action: #selector(showAbout), keyEquivalent: "")
         appMenu.addItem(aboutItem)
         appMenu.addItem(NSMenuItem.separator())
 
@@ -3118,7 +3125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
 
-        let hideItem = NSMenuItem(title: "Hide MXF2PRXY", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideItem = NSMenuItem(title: "Hide pxf", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(hideItem)
 
         let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
@@ -3130,7 +3137,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         appMenu.addItem(NSMenuItem.separator())
 
-        let quitItem = NSMenuItem(title: "Quit MXF2PRXY", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit pxf", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenu.addItem(quitItem)
         
         let appMenuItem = NSMenuItem()
@@ -3161,7 +3168,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             backing: .buffered,
             defer: false
         )
-        aboutWin.title = "About MXF2PRXY"
+        aboutWin.title = "About pxf"
         aboutWin.center()
         aboutWin.delegate = self
         aboutWin.minSize = NSSize(width: 400, height: 300)
@@ -3182,7 +3189,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
 
         let aboutText = """
-        MXF2PRXY  v\(version) (\(build))
+        pxf  v\(version) (\(build))
         MXF/MOV to proxy converter
 
         This application uses the following open-source libraries. \
@@ -3201,10 +3208,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         This application uses FFmpeg, LAME, fribidi, GLib, libintl, and Graphite2 \
         under the GNU Lesser General Public License. In accordance with LGPL v2.1 \
         Section 6, you may replace the shared libraries (.dylib files) bundled in \
-        MXF2PRXY.app/Contents/Frameworks/ with your own modified versions.
+        pxf.app/Contents/Frameworks/ with your own modified versions.
 
         After replacing a library, re-sign the app:
-            codesign --force --deep --sign - MXF2PRXY.app
+            codesign --force --deep --sign - pxf.app
 
         Source Code Offer
         The complete source code for all LGPL-licensed libraries, along with the \
@@ -3216,14 +3223,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
           - gettext: https://www.gnu.org/software/gettext/
           - Graphite2: https://github.com/nickshanks/graphite
           - Build script & patches: included in this app bundle at
-            MXF2PRXY.app/Contents/Resources/LGPL-Sources/
+            pxf.app/Contents/Resources/LGPL-Sources/
         This offer is valid for three years from the date of distribution.
 
         ─────────────────────────────────────────
         Replacing LGPL Libraries
         You have the right to replace any LGPL-licensed .dylib in this app bundle \
         with your own modified version. For step-by-step instructions, see:
-          MXF2PRXY.app/Contents/Resources/LGPL-Sources/RELINKING.txt
+          pxf.app/Contents/Resources/LGPL-Sources/RELINKING.txt
 
         ─────────────────────────────────────────
         LAME (libmp3lame)
@@ -3269,7 +3276,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     @objc func showUpgradePrompt() {
         let price = storeManager?.displayPrice ?? "$9.99"
         let alert = NSAlert()
-        alert.messageText = "Upgrade to MXF2Prxy Pro"
+        alert.messageText = "Upgrade to pxf Pro"
         alert.informativeText = "Unlock MXF output, ProRes Proxy and DNxHR LB codecs, and watermark customization for \(price)."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Buy for \(price)")
@@ -3289,7 +3296,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         self.applyPremiumRestrictions()
                         let done = NSAlert()
                         done.messageText = "Thank You!"
-                        done.informativeText = "MXF2Prxy Pro has been unlocked."
+                        done.informativeText = "pxf Pro has been unlocked."
                         done.alertStyle = .informational
                         done.addButton(withTitle: "OK")
                         await done.beginSheetModal(for: window)
@@ -3304,7 +3311,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         self.isPremiumUnlocked = true
                         self.applyPremiumRestrictions()
                         done.messageText = "Purchase Restored"
-                        done.informativeText = "MXF2Prxy Pro has been unlocked."
+                        done.informativeText = "pxf Pro has been unlocked."
                     } else {
                         done.messageText = "No Purchase Found"
                         done.informativeText = "No previous purchase was found for this Apple ID."
@@ -3471,7 +3478,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private func convertProResWithAVFoundation(inputURL: URL, outputURL: URL, logURL: URL, completion: @escaping (Bool) -> Void) {
         let asset = AVURLAsset(url: inputURL)
         
-        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1920x1080) else {
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
             appendLog(logURL: logURL, entry: "AVFoundation: Failed to create export session\n")
             completion(false)
             return

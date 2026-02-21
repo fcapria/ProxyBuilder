@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "MXFToQuickTime",
+    name: "pxf",
     platforms: [.macOS(.v13)],
     targets: [
         // C wrapper around ffmpeg — calls ffmpeg_main() in libfftools.a,
@@ -57,7 +57,7 @@ let package = Package(
         ),
         // Main application target
         .executableTarget(
-            name: "MXFToQuickTime",
+            name: "pxf",
             dependencies: ["CFFmpeg"],
             path: "Sources",
             exclude: ["CFFmpeg"]

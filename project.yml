@@ -1,4 +1,4 @@
-name: MXF2Prxy
+name: pxf
 options:
   bundleIdPrefix: com.frankcapria
   deploymentTarget:
@@ -8,25 +8,30 @@ options:
 settings:
   base:
     ARCHS: arm64
-    PRODUCT_NAME: MXF2PRXY
-    PRODUCT_BUNDLE_IDENTIFIER: com.frankcapria.mxf2prxy
-    CODE_SIGN_ENTITLEMENTS: MXF2PRXY.entitlements
+    PRODUCT_NAME: pxf
+    PRODUCT_BUNDLE_IDENTIFIER: com.frankcapria.pxf
+    CODE_SIGN_ENTITLEMENTS: pxf.entitlements
     CODE_SIGN_IDENTITY: "Apple Development"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: G85UV88266
     INFOPLIST_FILE: "$(SRCROOT)/Info.plist"
     GENERATE_INFOPLIST_FILE: false
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "3"
 
 targets:
-  MXF2PRXY:
+  pxf:
     type: application
     platform: macOS
     sources:
       - path: Sources/main.swift
       - path: Sources/CFFmpeg/ffmpeg_wrapper.c
       - path: Assets.xcassets
+        buildPhase: resources
+      - path: pfx_only.png
+        buildPhase: resources
+      - path: watermark.png
+        buildPhase: resources
     settings:
       base:
         ARCHS: arm64
@@ -138,7 +143,7 @@ targets:
           RESOURCES_DIR="${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
           mkdir -p "$RESOURCES_DIR"
           cp "${SRCROOT}/AppIcon.icns" "$RESOURCES_DIR/" 2>/dev/null
-          cp "${SRCROOT}/MXF2Prxy-logo.png" "$RESOURCES_DIR/" 2>/dev/null
+          cp "${SRCROOT}/pfx_only.png" "$RESOURCES_DIR/" 2>/dev/null
           cp "${SRCROOT}/watermark.png" "$RESOURCES_DIR/" 2>/dev/null
 
           # Strip quarantine attributes from all resources
