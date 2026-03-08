@@ -20,3 +20,28 @@ ffmpeg-static/
 *.zip
 MXF2PRXY safety *.app/
 test_avfoundation.swift
+
+# Build artifacts
+ffmpeg-dylib/
+*.dylib
+pxf.app
+fc.js
+
+# Design assets
+*.ai
+Stock for pxf/
+pxf logos/
+pxf screens/
+Screens/
+mxf2proxy*.png
+MXF2Prxy-icon.png
+MXF2Prxy-logo.png
+MXF2Prxy-mark.png
+
+# Old app artifacts
+MXF2PRXY.entitlements
+MXF2PRXY_*.md
+RELEASE_NOTES_*.md
+RELINKING.txt
+MXF2PRXY 2026-*/
+pxf/pxf/
