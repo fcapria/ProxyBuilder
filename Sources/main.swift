@@ -499,7 +499,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         dropView.layer?.addSublayer(borderLayer)
         self.dropBorderLayer = borderLayer
 
-        let dropLabel = NSTextField(labelWithString: "...Or Drag Files and Folders Here")
+        let dropLabel = NSTextField(labelWithString: "...Or Drag Files and Folders Here to Begin Encoding")
         dropLabel.frame = NSRect(x: 0, y: 110, width: 500, height: 30)
         dropLabel.font = NSFont.systemFont(ofSize: 13)
         dropLabel.alignment = .center
@@ -1487,7 +1487,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         panel.allowsMultipleSelection = true
         panel.treatsFilePackagesAsDirectories = false
         panel.message = "Select folders or MXF/MOV files"
-        panel.prompt = "Select"
+        panel.prompt = "Create Proxies"
         
         panel.begin { response in
             if response == .OK {
