@@ -22,8 +22,6 @@ MXF2PRXY safety *.app/
 test_avfoundation.swift
 
 # Build artifacts
-ffmpeg-dylib/
-*.dylib
 pxf.app
 fc.js
 
