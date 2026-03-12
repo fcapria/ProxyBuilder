@@ -288,6 +288,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var watermarkCheckbox: NSButton?
     private var watermarkSetButton: NSButton?
     private var upgradeButton: NSButton?
+    private var encodingSpinner: NSProgressIndicator?
+    private var encodingLabel: NSTextField?
     private var lutCheckbox: NSButton?
     private var lutLabel: NSTextField?
     private var dropLabel: NSTextField?
@@ -547,6 +549,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             contentView.addSubview(upgradeBtn)
             self.upgradeButton = upgradeBtn
         }
+
+        // Encoding spinner (below Upgrade button, hidden by default)
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .regular
+        let spinnerSize: CGFloat = 48
+        let spinnerX: CGFloat = 67
+        let spinnerY: CGFloat = 290
+        spinner.frame = NSRect(x: spinnerX, y: spinnerY, width: spinnerSize, height: spinnerSize)
+        spinner.isHidden = true
+        contentView.addSubview(spinner)
+        self.encodingSpinner = spinner
+
+        let encLabel = NSTextField(labelWithString: "Encoding...")
+        encLabel.frame = NSRect(x: 123, y: 304, width: 100, height: 20)
+        encLabel.font = NSFont.systemFont(ofSize: 13)
+        encLabel.isHidden = true
+        contentView.addSubview(encLabel)
+        self.encodingLabel = encLabel
+
         // Gear icon button (bottom right)
         let gearButton = NSButton(frame: NSRect(x: 560, y: 10, width: 24, height: 24))
         if #available(macOS 11.0, *) {
@@ -763,6 +785,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private func updateDropZoneAvailability() {
         dropView?.isDropEnabled = true
         queueCountLabel?.stringValue = "Items in queue: \(totalClipsQueued)"
+
+        let isEncoding = totalClipsQueued > 0
+        encodingSpinner?.isHidden = !isEncoding
+        encodingLabel?.isHidden = !isEncoding
+        if isEncoding {
+            encodingSpinner?.startAnimation(nil)
+        } else {
+            encodingSpinner?.stopAnimation(nil)
+        }
     }
     
     @objc func formatPopupChanged(_ sender: NSPopUpButton) {
@@ -1282,6 +1313,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Update drop zone label color to match text, border stays accent color
         dropLabel?.textColor = textColor
+        encodingLabel?.textColor = textColor
         if let url = encodingPathURL, let prefix = encodingPathPrefix {
             setEncodingPath(prefix, url: url)
         } else {
