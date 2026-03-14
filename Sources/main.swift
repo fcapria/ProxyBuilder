@@ -427,7 +427,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Destination path label (below Save to row, same style as LUT label)
         let destinationPathLabel = NSTextField(labelWithString: "")
         destinationPathLabel.frame = NSRect(x: 270, y: 427, width: 305, height: 16)
-        destinationPathLabel.font = NSFont.systemFont(ofSize: 11)
+        destinationPathLabel.font = NSFont.systemFont(ofSize: 13)
         destinationPathLabel.textColor = NSColor.secondaryLabelColor
         self.destinationPathLabel = destinationPathLabel
 
@@ -521,7 +521,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         let queueCountLabel = NSTextField(labelWithString: "Items in queue: 0")
         queueCountLabel.frame = NSRect(x: 0, y: 10, width: 500, height: 20)
-        queueCountLabel.font = NSFont.systemFont(ofSize: 12)
+        queueCountLabel.font = NSFont.systemFont(ofSize: 13)
         queueCountLabel.alignment = .center
         dropView.addSubview(queueCountLabel)
         self.queueCountLabel = queueCountLabel
@@ -629,7 +629,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // LUT filename label (below LUT row)
         let lutLabel = NSTextField(labelWithString: "")
         lutLabel.frame = NSRect(x: 270, y: 267, width: 305, height: 16)
-        lutLabel.font = NSFont.systemFont(ofSize: 11)
+        lutLabel.font = NSFont.systemFont(ofSize: 13)
         lutLabel.textColor = NSColor.secondaryLabelColor
         self.lutLabel = lutLabel
 
@@ -853,7 +853,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private func updateDestinationPathLabelColor() {
         guard let label = destinationPathLabel, !label.stringValue.isEmpty else { return }
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-        label.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+        label.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
     }
 
     private func updateCodecPopup() {
@@ -954,7 +954,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         guard let label = encodingPathLabel else { return }
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
         let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
-        let linkColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+        let linkColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
 
@@ -962,12 +962,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         let result = NSMutableAttributedString()
         result.append(NSAttributedString(string: prefix + "\n", attributes: [
-            .font: NSFont.systemFont(ofSize: 14),
+            .font: NSFont.systemFont(ofSize: 13),
             .foregroundColor: textColor,
             .paragraphStyle: paragraphStyle
         ]))
         result.append(NSAttributedString(string: path, attributes: [
-            .font: NSFont.systemFont(ofSize: 14),
+            .font: NSFont.systemFont(ofSize: 13),
             .foregroundColor: linkColor,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
             .paragraphStyle: paragraphStyle
@@ -1004,7 +1004,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                FileManager.default.fileExists(atPath: getLUTDirectoryURL().appendingPathComponent(savedLUT).path) {
                 lutLabel?.stringValue = savedLUT
                 let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-                lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+                lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
             }
         } else {
             lutLabel?.stringValue = ""
@@ -1029,7 +1029,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             // Update LUT label
             lutLabel?.stringValue = selectedTitle
             let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-            lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+            lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
         }
     }
 
@@ -1098,7 +1098,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 // Update LUT label
                 self.lutLabel?.stringValue = url.lastPathComponent
                 let isDark = self.currentMode == .auto ? self.isSystemDarkAppearance() : (self.currentMode == .night)
-                self.lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+                self.lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
 
                 // Refresh LUT management window if it's open
                 if self.lutManagementWindow != nil {
@@ -1164,7 +1164,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         lutCheckbox?.state = .on
         lutLabel?.stringValue = lutFilename
         let isDark = currentMode == .auto ? isSystemDarkAppearance() : (currentMode == .night)
-        lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+        lutLabel?.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
         // No need to repopulate menu; it will be rebuilt next time
     }
     
@@ -1255,7 +1255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         }
 
         // Update background color without implicit animations
-        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.655, green: 0.655, blue: 0.655, alpha: 1.0)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         contentView?.layer?.backgroundColor = bgColor.cgColor
@@ -1269,11 +1269,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         codecLabel?.textColor = textColor
 
         // Update queue count label color - orange in both modes
-        let queueCountColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+        let queueCountColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
         queueCountLabel?.textColor = queueCountColor
 
         // Update button appearance
-        let accentColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+        let accentColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
 
         // Update button text color
 
@@ -1306,7 +1306,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Update LUT label color - orange in dark mode, blue in light mode (when LUT is selected)
         if let label = lutLabel, !label.stringValue.isEmpty {
-            label.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
+            label.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
         }
 
         // Update destination path label color
@@ -1333,7 +1333,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         settingsWin.animationBehavior = savedBehavior
 
         // Update content background without implicit animations
-        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.655, green: 0.655, blue: 0.655, alpha: 1.0)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         contentView.layer?.backgroundColor = bgColor.cgColor
@@ -1372,7 +1372,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         lutWin.animationBehavior = savedBehavior
 
         // Update content background without implicit animations
-        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.655, green: 0.655, blue: 0.655, alpha: 1.0)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         contentView.layer?.backgroundColor = bgColor.cgColor
@@ -1426,7 +1426,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         wmWin.animationBehavior = savedBehavior
 
         // Update content background without implicit animations
-        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)
+        let bgColor = isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.655, green: 0.655, blue: 0.655, alpha: 1.0)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         contentView.layer?.backgroundColor = bgColor.cgColor
@@ -1467,11 +1467,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // If auto mode, check system appearance
         if mode == .auto {
             let isDark = isSystemDarkAppearance()
-            color = isDark ? NSColor.black : NSColor(red: 0.65, green: 0.65, blue: 0.65, alpha: 1.0)
+            color = isDark ? NSColor.black : NSColor(red: 0.585, green: 0.585, blue: 0.585, alpha: 1.0)
         } else if mode == .night {
             color = NSColor.black
         } else {
-            color = NSColor(red: 0.65, green: 0.65, blue: 0.65, alpha: 1.0) // Lighter gray
+            color = NSColor(red: 0.585, green: 0.585, blue: 0.585, alpha: 1.0)
         }
         dropView?.layer?.backgroundColor = color.cgColor
     }
@@ -2408,7 +2408,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             if isDark {
                 contentView.layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0).cgColor
             } else {
-                contentView.layer?.backgroundColor = NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0).cgColor
+                contentView.layer?.backgroundColor = NSColor(red: 0.655, green: 0.655, blue: 0.655, alpha: 1.0).cgColor
             }
 
             // Title label
@@ -2722,7 +2722,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
             let contentView = NSView()
             contentView.wantsLayer = true
-            contentView.layer?.backgroundColor = (isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0)).cgColor
+            contentView.layer?.backgroundColor = (isDark ? NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0) : NSColor(red: 0.655, green: 0.655, blue: 0.655, alpha: 1.0)).cgColor
 
             let textColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
             let buttonTextColor = isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(white: 0.2, alpha: 1.0)
@@ -2805,7 +2805,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 nameButton.isBordered = false
                 let isSelected = wmName == currentLibraryFile
                 let nameColor: NSColor = isSelected
-                    ? (isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0))
+                    ? (isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0))
                     : (isDark ? NSColor(red: 0.667, green: 0.667, blue: 0.667, alpha: 1.0) : NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0))
                 nameButton.font = NSFont.systemFont(ofSize: 12)
                 let nameAttrs: [NSAttributedString.Key: Any] = [
@@ -3418,7 +3418,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             if isDark {
                 contentView.layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1.0).cgColor
             } else {
-                contentView.layer?.backgroundColor = NSColor(red: 0.78, green: 0.78, blue: 0.78, alpha: 1.0).cgColor
+                contentView.layer?.backgroundColor = NSColor(red: 0.655, green: 0.655, blue: 0.655, alpha: 1.0).cgColor
             }
 
             contentView.addSubview(watermarkButton)
