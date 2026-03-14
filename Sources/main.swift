@@ -296,7 +296,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var encodingPathLabel: ClickableLabel?
     private var encodingPathURL: URL?
     private var encodingPathPrefix: String?
-    private var destinationPopup: NSPopUpButton?
+    private var insideSourceButton: NSButton?
+    private var chooseFolderButton: NSButton?
     private var destinationLabel: NSTextField?
     private var destinationPathLabel: NSTextField?
     private var selectedDestinationURL: URL?
@@ -405,16 +406,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         self.formatPopup = formatPopup
 
         // Destination label and popup
-        let destinationLabel = NSTextField(labelWithString: "Dest.")
+        let destinationLabel = NSTextField(labelWithString: "Save to")
         destinationLabel.frame = NSRect(x: 270, y: 453, width: 50, height: 20)
         self.destinationLabel = destinationLabel
 
-        let destinationPopup = NSPopUpButton(frame: NSRect(x: 325, y: 450, width: 150, height: 26))
-        destinationPopup.target = self
-        destinationPopup.action = #selector(destinationPopupChanged(_:))
-        self.destinationPopup = destinationPopup
+        let insideSourceButton = NSButton(frame: NSRect(x: 325, y: 450, width: 110, height: 26))
+        insideSourceButton.title = "Source Folder"
+        insideSourceButton.bezelStyle = .rounded
+        insideSourceButton.target = self
+        insideSourceButton.action = #selector(insideSourceFolderClicked(_:))
+        self.insideSourceButton = insideSourceButton
 
-        // Destination path label (below Dest. row, same style as LUT label)
+        let chooseFolderButton = NSButton(frame: NSRect(x: 440, y: 450, width: 70, height: 26))
+        chooseFolderButton.title = "Other..."
+        chooseFolderButton.bezelStyle = .rounded
+        chooseFolderButton.target = self
+        chooseFolderButton.action = #selector(chooseFolderClicked(_:))
+        self.chooseFolderButton = chooseFolderButton
+
+        // Destination path label (below Save to row, same style as LUT label)
         let destinationPathLabel = NSTextField(labelWithString: "")
         destinationPathLabel.frame = NSRect(x: 270, y: 427, width: 305, height: 16)
         destinationPathLabel.font = NSFont.systemFont(ofSize: 11)
@@ -423,12 +433,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Restore destination from UserDefaults
         let savedDestMode = UserDefaults.standard.integer(forKey: "destinationMode")
-        if savedDestMode == 1 {
-            // Inside Source Folder
-            destinationPopup.addItems(withTitles: ["Inside Source Folder", "Select..."])
-            destinationPopup.selectItem(at: 0)
-        } else if savedDestMode == 2, let bookmarkData = UserDefaults.standard.data(forKey: "destinationBookmark") {
-            // Custom destination — restore from bookmark
+        if savedDestMode == 2, let bookmarkData = UserDefaults.standard.data(forKey: "destinationBookmark") {
             var isStale = false
             if let url = try? URL(resolvingBookmarkData: bookmarkData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale) {
                 if isStale {
@@ -443,12 +448,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                     destinationPathLabel.stringValue = path
                 }
             }
-            destinationPopup.addItems(withTitles: ["Inside Source Folder", "Select..."])
-            destinationPopup.selectItem(at: 1)
-        } else {
-            // First launch — no destination chosen yet
-            destinationPopup.addItems(withTitles: ["-Choose-", "Inside Source Folder", "Select..."])
-            destinationPopup.selectItem(at: 0)
+        }
+        if !destinationAccessGranted {
+            UserDefaults.standard.set(1, forKey: "destinationMode")
+            destinationPathLabel.stringValue = "Inside Source Folder"
         }
 
         // Codec label and popup
@@ -474,12 +477,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         sizePopup.action = #selector(sizePopupChanged(_:))
         self.sizePopup = sizePopup
 
-        let button = OrangeButton(frame: NSRect(x: 170, y: 200, width: 270, height: 40))
+        let button = NSButton(frame: NSRect(x: 170, y: 200, width: 270, height: 26))
         button.title = "Select Files or Folders to Encode..."
         button.bezelStyle = .rounded
-        if #available(macOS 10.14, *) {
-            button.contentTintColor = NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) // #ff7c06
-        }
         button.target = self
         button.action = #selector(selectFolder)
         self.button = button
@@ -655,7 +655,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         contentView.addSubview(formatLabel)
         contentView.addSubview(formatPopup)
         contentView.addSubview(destinationLabel)
-        contentView.addSubview(destinationPopup)
+        contentView.addSubview(insideSourceButton)
+        contentView.addSubview(chooseFolderButton)
         contentView.addSubview(destinationPathLabel)
         contentView.addSubview(codecLabel)
         contentView.addSubview(codecPopup)
@@ -812,63 +813,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         UserDefaults.standard.set(selectedSizeIndex, forKey: "selectedSizeIndex")
     }
 
-    @objc func destinationPopupChanged(_ sender: NSPopUpButton) {
-        guard let selectedTitle = sender.titleOfSelectedItem else { return }
-
-        // Remove the "-Choose-" placeholder if it's still present
-        if sender.itemTitles.contains("-Choose-") && selectedTitle != "-Choose-" {
-            sender.removeItem(withTitle: "-Choose-")
+    @objc func insideSourceFolderClicked(_ sender: NSButton) {
+        if destinationAccessGranted {
+            selectedDestinationURL?.stopAccessingSecurityScopedResource()
+            destinationAccessGranted = false
         }
+        selectedDestinationURL = nil
+        UserDefaults.standard.set(1, forKey: "destinationMode")
+        UserDefaults.standard.removeObject(forKey: "destinationBookmark")
+        destinationPathLabel?.stringValue = "Inside Source Folder"
+        destinationPathLabel?.textColor = NSColor.secondaryLabelColor
+    }
 
-        if selectedTitle == "Select..." {
-            // Open folder picker for custom destination
-            let panel = NSOpenPanel()
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.canCreateDirectories = true
-            panel.allowsMultipleSelection = false
-            panel.prompt = "Select"
-            panel.message = "Choose destination folder for proxies"
+    @objc func chooseFolderClicked(_ sender: NSButton) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose destination folder for proxies"
 
-            if panel.runModal() == .OK, let url = panel.url {
-                // Release previous bookmark access
-                if destinationAccessGranted {
-                    selectedDestinationURL?.stopAccessingSecurityScopedResource()
-                    destinationAccessGranted = false
-                }
-                // Save security-scoped bookmark for sandbox persistence
-                if let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
-                    UserDefaults.standard.set(bookmark, forKey: "destinationBookmark")
-                }
-                selectedDestinationURL = url
-                UserDefaults.standard.set(2, forKey: "destinationMode")
-                let path = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-                destinationPathLabel?.stringValue = path
-                updateDestinationPathLabelColor()
-            } else {
-                // User cancelled — revert to previous selection
-                let currentMode = UserDefaults.standard.integer(forKey: "destinationMode")
-                if currentMode == 1 {
-                    sender.selectItem(withTitle: "Inside Source Folder")
-                } else if currentMode == 2 {
-                    sender.selectItem(withTitle: "Select...")
-                } else {
-                    // No prior choice — re-add placeholder
-                    if !sender.itemTitles.contains("-Choose-") {
-                        sender.insertItem(withTitle: "-Choose-", at: 0)
-                    }
-                    sender.selectItem(withTitle: "-Choose-")
-                }
-            }
-        } else if selectedTitle == "Inside Source Folder" {
+        if panel.runModal() == .OK, let url = panel.url {
             if destinationAccessGranted {
                 selectedDestinationURL?.stopAccessingSecurityScopedResource()
                 destinationAccessGranted = false
             }
-            selectedDestinationURL = nil
-            UserDefaults.standard.set(1, forKey: "destinationMode")
-            UserDefaults.standard.removeObject(forKey: "destinationBookmark")
-            destinationPathLabel?.stringValue = ""
+            if let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+                UserDefaults.standard.set(bookmark, forKey: "destinationBookmark")
+            }
+            selectedDestinationURL = url
+            UserDefaults.standard.set(2, forKey: "destinationMode")
+            let path = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+            destinationPathLabel?.stringValue = path
+            updateDestinationPathLabelColor()
         }
     }
 
@@ -1296,15 +1274,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Update button appearance
         let accentColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.659, green: 0.259, blue: 0.063, alpha: 1.0)
-        if #available(macOS 10.14, *) {
-            button?.contentTintColor = accentColor
-        }
 
-        // Update button text color - use same color as Output label
-        if let btn = button {
-            let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor]
-            btn.attributedTitle = NSAttributedString(string: btn.title, attributes: attrs)
-        }
+        // Update button text color
 
         // Update gear icon color to match text color
         if #available(macOS 10.14, *) {
@@ -2368,7 +2339,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         if destMode == 0 {
             let alert = NSAlert()
             alert.messageText = "No Destination Selected"
-            alert.informativeText = "Please choose a destination from the Dest. menu before encoding."
+            alert.informativeText = "Please choose a destination folder or leave as default to save inside the source folder."
             alert.alertStyle = .warning
             alert.addButton(withTitle: "OK")
             if let window = self.window {
