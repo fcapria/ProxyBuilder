@@ -4,6 +4,8 @@ import AVFoundation
 import StoreKit
 import UniformTypeIdentifiers
 
+let acceptedFormats: Set<String> = ["mxf", "mov", "mp4", "avi"]
+
 let app = NSApplication.shared
 @MainActor
 func setup() {
@@ -110,7 +112,7 @@ class DropView: NSView {
             var isDir: ObjCBool = false
             let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
             let ext = url.pathExtension.lowercased()
-            if exists && (isDir.boolValue || ext == "mxf" || ext == "mov") {
+            if exists && (isDir.boolValue || acceptedFormats.contains(ext)) {
                 dropDelegate?.handleDrop(url: url)
                 processedAny = true
             }
@@ -166,7 +168,7 @@ class DropView: NSView {
             var isDir: ObjCBool = false
             let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
             let ext = url.pathExtension.lowercased()
-            return exists && (isDir.boolValue || ext == "mxf" || ext == "mov")
+            return exists && (isDir.boolValue || acceptedFormats.contains(ext))
         })
     }
 }
@@ -375,7 +377,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         let window = NSWindow(
             contentRect: NSRect(x: 100, y: 100, width: 610, height: 530),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -767,7 +769,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 var fileCount = 0
                 for case let fileURL as URL in enumerator {
                     let ext = fileURL.pathExtension.lowercased()
-                    if ext == "mxf" || ext == "mov" {
+                    if acceptedFormats.contains(ext) {
                         fileCount += 1
                     }
                 }
@@ -1538,7 +1540,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                             continue
                         }
                         let ext = fileURL.pathExtension.lowercased()
-                        if ext == "mxf" || ext == "mov" {
+                        if acceptedFormats.contains(ext) {
                             mxfFiles.append(fileURL)
                             // Compute relative subdirectory path from source folder
                             let parentDir = fileURL.deletingLastPathComponent()
