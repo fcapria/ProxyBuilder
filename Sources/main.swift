@@ -3158,8 +3158,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let fileMenuItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
-        
+
+        let helpMenu = NSMenu(title: "Help")
+        let supportItem = NSMenuItem(title: "pxf Support", action: #selector(openSupport), keyEquivalent: "")
+        helpMenu.addItem(supportItem)
+        let helpMenuItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+        helpMenuItem.submenu = helpMenu
+        mainMenu.addItem(helpMenuItem)
+
         NSApplication.shared.mainMenu = mainMenu
+    }
+
+    @objc func openSupport() {
+        NSWorkspace.shared.open(URL(string: "https://frankcapria.com/support/")!)
     }
     
     @objc func showAbout() {
@@ -3197,6 +3208,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let aboutText = """
         pxf  v\(version) (\(build))
         MXF/MOV to proxy converter
+        Privacy Policy: https://frankcapria.com/privacy-policy/
 
         This application uses the following open-source libraries. \
         The FFmpeg libraries are dynamically linked under the terms of the \
@@ -3331,21 +3343,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     }
 
     @objc func showSettings() {
-        // Debug: Option-click gear to toggle premium
-        if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
-            isPremiumUnlocked.toggle()
-            let alert = NSAlert()
-            alert.messageText = isPremiumUnlocked ? "Premium Unlocked" : "Premium Locked"
-            alert.informativeText = isPremiumUnlocked ? "All features are now available." : "Free mode restrictions are now active."
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            if let window = self.window {
-                alert.beginSheetModal(for: window)
-            }
-            applyPremiumRestrictions()
-            return
-        }
-
         if settingsWindow == nil {
             guard let mainWindow = window else { return }
             let settingsSize = NSSize(width: 400, height: 260)
