@@ -385,6 +385,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         window.title = "pxf"
         window.titlebarAppearsTransparent = true
         window.isRestorable = false
+        window.minSize = NSSize(width: 610, height: 530)
 
         // Set initial appearance and colors based on mode
         let titleBarColor = isDark ? NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0) : NSColor(red: 0.73, green: 0.73, blue: 0.73, alpha: 1.0)
@@ -397,6 +398,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Output format label and popup
         let formatLabel = NSTextField(labelWithString: "Output")
         formatLabel.frame = NSRect(x: 270, y: 486, width: 50, height: 20)
+        formatLabel.autoresizingMask = [.minYMargin]
         self.formatLabel = formatLabel
 
         let formatPopup = NSPopUpButton(frame: NSRect(x: 325, y: 483, width: 150, height: 26))
@@ -405,11 +407,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         formatPopup.selectItem(at: selectedFormat)
         formatPopup.target = self
         formatPopup.action = #selector(formatPopupChanged(_:))
+        formatPopup.autoresizingMask = [.minYMargin]
         self.formatPopup = formatPopup
 
         // Destination label and popup
         let destinationLabel = NSTextField(labelWithString: "Save to")
         destinationLabel.frame = NSRect(x: 270, y: 453, width: 50, height: 20)
+        destinationLabel.autoresizingMask = [.minYMargin]
         self.destinationLabel = destinationLabel
 
         let insideSourceButton = NSButton(frame: NSRect(x: 325, y: 450, width: 110, height: 26))
@@ -417,6 +421,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         insideSourceButton.bezelStyle = .rounded
         insideSourceButton.target = self
         insideSourceButton.action = #selector(insideSourceFolderClicked(_:))
+        insideSourceButton.autoresizingMask = [.minYMargin]
         self.insideSourceButton = insideSourceButton
 
         let chooseFolderButton = NSButton(frame: NSRect(x: 440, y: 450, width: 70, height: 26))
@@ -424,6 +429,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         chooseFolderButton.bezelStyle = .rounded
         chooseFolderButton.target = self
         chooseFolderButton.action = #selector(chooseFolderClicked(_:))
+        chooseFolderButton.autoresizingMask = [.minYMargin]
         self.chooseFolderButton = chooseFolderButton
 
         // Destination path label (below Save to row, same style as LUT label)
@@ -431,6 +437,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         destinationPathLabel.frame = NSRect(x: 270, y: 427, width: 305, height: 16)
         destinationPathLabel.font = NSFont.systemFont(ofSize: 13)
         destinationPathLabel.textColor = NSColor.secondaryLabelColor
+        destinationPathLabel.autoresizingMask = [.minYMargin]
         self.destinationPathLabel = destinationPathLabel
 
         // Restore destination from UserDefaults
@@ -459,17 +466,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         // Codec label and popup
         let codecLabel = NSTextField(labelWithString: "Codec")
         codecLabel.frame = NSRect(x: 270, y: 392, width: 50, height: 20)
+        codecLabel.autoresizingMask = [.minYMargin]
         self.codecLabel = codecLabel
 
         let codecPopup = NSPopUpButton(frame: NSRect(x: 325, y: 389, width: 150, height: 26))
         (codecPopup.cell as? NSPopUpButtonCell)?.autoenablesItems = false
         codecPopup.target = self
         codecPopup.action = #selector(codecPopupChanged(_:))
+        codecPopup.autoresizingMask = [.minYMargin]
         self.codecPopup = codecPopup
 
         // Size label and popup
         let sizeLabel = NSTextField(labelWithString: "Size")
         sizeLabel.frame = NSRect(x: 270, y: 359, width: 50, height: 20)
+        sizeLabel.autoresizingMask = [.minYMargin]
 
         let sizePopup = NSPopUpButton(frame: NSRect(x: 325, y: 356, width: 150, height: 26))
         sizePopup.addItems(withTitles: ["Full", "Half"])
@@ -477,6 +487,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         sizePopup.selectItem(at: selectedSizeIndex)
         sizePopup.target = self
         sizePopup.action = #selector(sizePopupChanged(_:))
+        sizePopup.autoresizingMask = [.minYMargin]
         self.sizePopup = sizePopup
 
         let button = NSButton(frame: NSRect(x: 170, y: 200, width: 270, height: 26))
@@ -484,14 +495,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         button.bezelStyle = .rounded
         button.target = self
         button.action = #selector(selectFolder)
+        button.autoresizingMask = [.minYMargin]
         self.button = button
-        
+
         let dropView = DropView()
         dropView.dropDelegate = self
         dropView.wantsLayer = true
         self.dropView = dropView
         updateDropViewColor()
         dropView.frame = NSRect(x: 50, y: 40, width: 500, height: 150)
+        dropView.autoresizingMask = [.height]
         
         // Create dotted border using CAShapeLayer
         let borderLayer = CAShapeLayer()
@@ -507,6 +520,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         dropLabel.frame = NSRect(x: 0, y: 110, width: 500, height: 30)
         dropLabel.font = NSFont.systemFont(ofSize: 13)
         dropLabel.alignment = .center
+        dropLabel.autoresizingMask = [.minYMargin]
         dropView.addSubview(dropLabel)
         self.dropLabel = dropLabel
 
@@ -515,6 +529,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         encodingPathLabel.font = NSFont.systemFont(ofSize: 16)
         encodingPathLabel.alignment = .center
         encodingPathLabel.maximumNumberOfLines = 2
+        encodingPathLabel.autoresizingMask = [.minYMargin]
         dropView.addSubview(encodingPathLabel)
         self.encodingPathLabel = encodingPathLabel
 
@@ -528,7 +543,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         dropView.addSubview(queueCountLabel)
         self.queueCountLabel = queueCountLabel
         
-        let contentView = NSView()
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 610, height: 530))
         contentView.wantsLayer = true
           if let logoURL = Bundle.main.url(forResource: "pfx_only", withExtension: "png"),
               let logoImage = NSImage(contentsOf: logoURL) {
@@ -561,6 +576,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let spinnerY: CGFloat = 290
         spinner.frame = NSRect(x: spinnerX, y: spinnerY, width: spinnerSize, height: spinnerSize)
         spinner.isHidden = true
+        spinner.autoresizingMask = [.minYMargin]
         contentView.addSubview(spinner)
         self.encodingSpinner = spinner
 
@@ -568,6 +584,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         encLabel.frame = NSRect(x: 123, y: 304, width: 100, height: 20)
         encLabel.font = NSFont.systemFont(ofSize: 13)
         encLabel.isHidden = true
+        encLabel.autoresizingMask = [.minYMargin]
         contentView.addSubview(encLabel)
         self.encodingLabel = encLabel
 
@@ -588,11 +605,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         gearButton.toolTip = "Settings"
         gearButton.target = self
         gearButton.action = #selector(showSettings)
+        gearButton.autoresizingMask = [.minXMargin]
         self.gearButton = gearButton
 
         // Watermark checkbox
         let watermarkCheckbox = NSButton(checkboxWithTitle: "Apply watermark", target: self, action: #selector(watermarkCheckboxChanged(_:)))
         watermarkCheckbox.frame = NSRect(x: 270, y: 326, width: 140, height: 20)
+        watermarkCheckbox.autoresizingMask = [.minYMargin]
         // Default to true on first launch
         if UserDefaults.standard.object(forKey: "watermarkEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "watermarkEnabled")
@@ -615,16 +634,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         watermarkSetButton.action = #selector(showWatermarkManagement)
         let wmEnabled = UserDefaults.standard.bool(forKey: "watermarkEnabled")
         watermarkSetButton.isEnabled = wmEnabled
+        watermarkSetButton.autoresizingMask = [.minYMargin]
         self.watermarkSetButton = watermarkSetButton
 
         // LUT checkbox and popup
         let lutCheckbox = NSButton(checkboxWithTitle: "Apply LUT", target: self, action: #selector(lutCheckboxChanged(_:)))
         lutCheckbox.frame = NSRect(x: 270, y: 293, width: 90, height: 20)
+        lutCheckbox.autoresizingMask = [.minYMargin]
         self.lutCheckbox = lutCheckbox
 
         let lutPopup = NSPopUpButton(frame: NSRect(x: 360, y: 290, width: 215, height: 26))
         lutPopup.target = self
         lutPopup.action = #selector(lutPopupChanged(_:))
+        lutPopup.autoresizingMask = [.minYMargin]
         self.lutPopup = lutPopup
         populateLUTPopup()
 
@@ -633,6 +655,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         lutLabel.frame = NSRect(x: 270, y: 267, width: 305, height: 16)
         lutLabel.font = NSFont.systemFont(ofSize: 13)
         lutLabel.textColor = NSColor.secondaryLabelColor
+        lutLabel.autoresizingMask = [.minYMargin]
         self.lutLabel = lutLabel
 
         // Check if LUT already selected and set initial states
@@ -736,6 +759,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
         // Allow main window to close normally (quits the app)
         return true
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard let dv = dropView else { return }
+        dropBorderLayer?.path = CGPath(rect: dv.bounds, transform: nil)
     }
 
     func windowWillClose(_ notification: Notification) {
