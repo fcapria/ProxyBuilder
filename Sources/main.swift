@@ -4,7 +4,7 @@ import AVFoundation
 import StoreKit
 import UniformTypeIdentifiers
 
-let acceptedFormats: Set<String> = ["mxf", "mov", "mp4", "avi"]
+let acceptedFormats: Set<String> = ["mxf", "mov", "mp4", "avi", "flv"]
 
 let app = NSApplication.shared
 @MainActor
@@ -313,6 +313,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     private var activeJob: URL?
     private var isProcessing: Bool = false
     private var totalClipsQueued: Int = 0
+    private var totalClipsInitial: Int = 0
+    private var progressBar: NSProgressIndicator?
     private var fileRelativePaths: [URL: String] = [:]
     private var isPremiumUnlocked: Bool {
         get { UserDefaults.standard.bool(forKey: "isPremiumUnlocked") }
@@ -350,9 +352,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             case .quickTime:
                 return [.h265, .h264, .proresProxy, .dnxhrLB]
             case .mpeg4:
-                return [.h265, .h264]
+                return [.h265, .h264, .proresProxy, .dnxhrLB]
             case .mxf:
-                return [.mpeg2, .proresProxy, .dnxhrLB]
+                return [.proresProxy, .dnxhrLB]
             }
         }
     }
@@ -536,9 +538,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(encodingPathClicked))
         encodingPathLabel.addGestureRecognizer(clickGesture)
 
-        let queueCountLabel = NSTextField(labelWithString: "Items in queue: 0")
-        queueCountLabel.frame = NSRect(x: 0, y: 10, width: 500, height: 20)
-        queueCountLabel.font = NSFont.systemFont(ofSize: 13)
+        let progressBar = NSProgressIndicator(frame: NSRect(x: 50, y: 38, width: 400, height: 8))
+        progressBar.style = .bar
+        progressBar.minValue = 0
+        progressBar.maxValue = 1
+        progressBar.doubleValue = 0
+        progressBar.isIndeterminate = false
+        progressBar.isHidden = true
+        progressBar.alphaValue = 1.0
+        dropView.addSubview(progressBar)
+        self.progressBar = progressBar
+
+        let queueCountLabel = NSTextField(labelWithString: "In Queue: 0")
+        queueCountLabel.frame = NSRect(x: 0, y: 10, width: 500, height: 24)
+        queueCountLabel.font = NSFont.systemFont(ofSize: 18)
         queueCountLabel.alignment = .center
         dropView.addSubview(queueCountLabel)
         self.queueCountLabel = queueCountLabel
@@ -815,22 +828,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
 
     private func updateDropZoneAvailability() {
         dropView?.isDropEnabled = true
-        queueCountLabel?.stringValue = "Items in queue: \(totalClipsQueued)"
+        queueCountLabel?.stringValue = "In Queue: \(totalClipsQueued)"
 
         let isEncoding = totalClipsQueued > 0
         encodingSpinner?.isHidden = !isEncoding
         encodingLabel?.isHidden = !isEncoding
         if isEncoding {
             encodingSpinner?.startAnimation(nil)
+            if totalClipsInitial == 0 {
+                totalClipsInitial = totalClipsQueued
+            }
+            let completed = totalClipsInitial - totalClipsQueued
+            progressBar?.doubleValue = Double(completed) / Double(totalClipsInitial)
+            progressBar?.isHidden = false
         } else {
             encodingSpinner?.stopAnimation(nil)
+            progressBar?.doubleValue = 0
+            progressBar?.isHidden = true
+            totalClipsInitial = 0
         }
     }
     
     @objc func formatPopupChanged(_ sender: NSPopUpButton) {
+        let previousFormat = currentOutputFormat()
         selectedFormat = sender.indexOfSelectedItem
         UserDefaults.standard.set(selectedFormat, forKey: "selectedFormatSegment")
-        updateCodecPopup()
+        updateCodecPopup(previousFormat: previousFormat)
     }
 
     @objc func codecPopupChanged(_ sender: NSPopUpButton) {
@@ -886,7 +909,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         label.textColor = isDark ? NSColor(red: 0.898, green: 0.361, blue: 0.090, alpha: 1.0) : NSColor(red: 0.0, green: 0.4, blue: 0.8, alpha: 1.0)
     }
 
-    private func updateCodecPopup() {
+    private func updateCodecPopup(previousFormat: OutputFormat? = nil) {
         guard let popup = codecPopup else { return }
         popup.removeAllItems()
         let format = currentOutputFormat()
@@ -899,17 +922,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 popup.lastItem?.isEnabled = false
             }
         }
-        // Restore saved codec for this format, or default to first
-        let savedIndex = UserDefaults.standard.integer(forKey: "selectedCodecIndex_\(selectedFormat)")
-        if savedIndex < codecs.count && (popup.item(at: savedIndex)?.isEnabled ?? false) {
-            selectedCodecIndex = savedIndex
+        // Try to keep the same codec when switching formats
+        let previousCodec: VideoCodec?
+        if let previousFormat = previousFormat {
+            let prevCodecs = VideoCodec.codecs(for: previousFormat)
+            previousCodec = selectedCodecIndex < prevCodecs.count ? prevCodecs[selectedCodecIndex] : nil
         } else {
-            // Find first enabled item
-            selectedCodecIndex = 0
+            previousCodec = nil
+        }
+        var matchedIndex: Int? = nil
+        if let previousCodec = previousCodec {
             for i in 0..<codecs.count {
-                if popup.item(at: i)?.isEnabled ?? false {
-                    selectedCodecIndex = i
+                if codecs[i] == previousCodec && (popup.item(at: i)?.isEnabled ?? false) {
+                    matchedIndex = i
                     break
+                }
+            }
+        }
+        if let matched = matchedIndex {
+            selectedCodecIndex = matched
+        } else {
+            // Fall back to saved codec for this format, or first enabled item
+            let savedIndex = UserDefaults.standard.integer(forKey: "selectedCodecIndex_\(selectedFormat)")
+            if savedIndex < codecs.count && (popup.item(at: savedIndex)?.isEnabled ?? false) {
+                selectedCodecIndex = savedIndex
+            } else {
+                selectedCodecIndex = 0
+                for i in 0..<codecs.count {
+                    if popup.item(at: i)?.isEnabled ?? false {
+                        selectedCodecIndex = i
+                        break
+                    }
                 }
             }
         }
@@ -1882,7 +1925,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         case .quickTime:
             // Only ProRes MOV files need AVFoundation intermediate (handles high bit-depth)
             // Other MOV codecs (DNxHR, H.264, etc.) go direct through FFmpeg
-            let needsIntermediateConversion = mxfFile.pathExtension.lowercased() == "mov" && sourceIsProRes
+            let needsIntermediateConversion = mxfFile.pathExtension.lowercased() == "mov" && sourceIsProRes && videoWidth <= 4096 && videoHeight <= 4096
             
             if needsIntermediateConversion {
                 // Step 1: Use AVFoundation to convert ProRes to H.264 (handles all bit depths)
@@ -2242,12 +2285,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         "-i", tempVideoURL.path,
                         "-map", "1:v:0",
                         "-map", "0:a?",
-                        "-map", "0:d?",
-                        "-map", "0:s?",
                         "-c:v", "copy",
                         "-c:a", "copy",
-                        "-c:d", "copy",
-                        "-c:s", "copy",
                         "-map_metadata", "0",
                         "-f", "mxf",
                         outputFileURL.path
@@ -2380,7 +2419,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             updateDropZoneAvailability()
             return
         }
-        let next = jobQueue.removeFirst()
+        let next = jobQueue.first!
+        if destMode == 1 {
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: next.path, isDirectory: &isDir)
+            if isDir.boolValue {
+                if let enumerator = FileManager.default.enumerator(at: next, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                    var hasSubdirectories = false
+                    for case let fileURL as URL in enumerator {
+                        var isDirCheck: ObjCBool = false
+                        FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirCheck)
+                        if isDirCheck.boolValue {
+                            hasSubdirectories = true
+                            break
+                        }
+                    }
+                    if hasSubdirectories {
+                        let alert = NSAlert()
+                        alert.messageText = "Cannot Save to Source Folder"
+                        alert.informativeText = "pxf does not allow saving to the source folder when there are embedded directories. Please select a different destination."
+                        alert.alertStyle = .warning
+                        alert.addButton(withTitle: "OK")
+                        if let window = self.window {
+                            alert.beginSheetModal(for: window)
+                        }
+                        jobQueue.removeAll()
+                        totalClipsQueued = 0
+                        updateDropZoneAvailability()
+                        return
+                    }
+                }
+            }
+        }
+        jobQueue.removeFirst()
         activeJob = next
         isProcessing = true
         let fmt = currentOutputFormat()
