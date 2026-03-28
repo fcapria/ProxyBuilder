@@ -1,9 +1,9 @@
 # Privacy Policy
 
-**MXF2Prxy**
+**pxf**
 **Last updated: February 15, 2026**
 
-MXF2Prxy does not collect, store, transmit, or share any personal information or user data.
+pxf does not collect, store, transmit, or share any personal information or user data.
 
 All file processing is performed entirely on your device. No files, metadata, or usage data are sent to any server or third party.
 

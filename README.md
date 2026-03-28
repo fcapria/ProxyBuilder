@@ -1,4 +1,4 @@
-# MXF2PRXY
+# pxf
 
 A macOS app designed to streamline the creation of on-set dailies and edit proxies from professional video formats.
 
@@ -18,9 +18,9 @@ A macOS app designed to streamline the creation of on-set dailies and edit proxi
 
 ### For End Users (Recommended)
 
-1. Download the latest `MXF2PRXY.app.zip` from the [Releases](https://github.com/fcapria/ProxyBuilder/releases) page
+1. Download the latest `pxf.app.zip` from the [Releases](https://github.com/fcapria/ProxyBuilder/releases) page
 2. Unzip the file
-3. Move `MXF2PRXY.app` to your Applications folder
+3. Move `pxf.app` to your Applications folder
 4. Right-click the app and select "Open" (first launch only, to bypass Gatekeeper)
 
 ### For Developers (Building from Source)
@@ -45,7 +45,7 @@ A macOS app designed to streamline the creation of on-set dailies and edit proxi
 3. Add required resource files to the project directory:
    - `AppIcon.icns` - Application icon
    - `watermark.png` - Optional watermark image
-   - `MXF2Prxy-logo.png` - Optional logo image
+   - `pxf-logo.png` - Optional logo image
 
 4. Build and launch:
    ```bash
@@ -61,7 +61,7 @@ The build script will:
 
 ## Usage
 
-1. Launch MXF2PRXY
+1. Launch pxf
 2. Select output format (QuickTime or MXF)
 3. Drag and drop video files onto the drop zone
 4. Select an output folder for the proxies

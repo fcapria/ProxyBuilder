@@ -11,12 +11,12 @@
       "localizations" : [
         {
           "description" : "Unlock MXF output, ProRes Proxy, DNxHR LB codecs, and watermark customization.",
-          "displayName" : "MXF2Prxy Pro",
+          "displayName" : "pxf Pro",
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.frankcapria.mxf2prxy.pro",
-      "referenceName" : "MXF2Prxy Pro Upgrade",
+      "productID" : "com.frankcapria.pxf.pro",
+      "referenceName" : "pxf Pro Upgrade",
       "type" : "NonConsumable"
     }
   ],
