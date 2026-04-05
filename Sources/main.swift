@@ -268,21 +268,26 @@ class StoreManager {
 }
 
 @available(macOS 15.0, *)
+class OfferCodeState: ObservableObject {
+    @Published var isPresented: Bool = true
+    var onComplete: (Bool) -> Void = { _ in }
+}
+
+@available(macOS 15.0, *)
 struct OfferCodeRedemptionView: View {
-    @Binding var isPresented: Bool
-    var onComplete: (Bool) -> Void
+    @ObservedObject var state: OfferCodeState
 
     var body: some View {
         Color.clear
             .frame(width: 1, height: 1)
-            .offerCodeRedemption(isPresented: $isPresented) { result in
+            .offerCodeRedemption(isPresented: $state.isPresented) { result in
                 switch result {
                 case .success:
-                    onComplete(true)
+                    state.onComplete(true)
                 case .failure:
-                    onComplete(false)
+                    state.onComplete(false)
                 @unknown default:
-                    onComplete(false)
+                    state.onComplete(false)
                 }
             }
     }
@@ -3470,51 +3475,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
     func presentOfferCodeRedemption() {
         guard let window = self.window else { return }
         if #available(macOS 15.0, *) {
-            let isPresented = Binding<Bool>(
-                get: { true },
-                set: { [weak self] newValue in
-                    if !newValue {
-                        // Sheet was dismissed — check entitlement
-                        Task { @MainActor in
-                            guard let self = self else { return }
-                            let entitled = await self.storeManager?.checkEntitlement() ?? false
-                            if entitled {
-                                self.isPremiumUnlocked = true
-                                self.applyPremiumRestrictions()
-                                let done = NSAlert()
-                                done.messageText = "Thank You!"
-                                done.informativeText = "pxf Pro has been unlocked."
-                                done.alertStyle = .informational
-                                done.addButton(withTitle: "OK")
-                                await done.beginSheetModal(for: window)
-                            }
-                        }
-                    }
-                }
-            )
-            let view = OfferCodeRedemptionView(isPresented: isPresented) { [weak self] success in
+            let state = OfferCodeState()
+            state.onComplete = { [weak self] success in
                 guard let self = self else { return }
-                if success {
-                    Task { @MainActor in
-                        let entitled = await self.storeManager?.checkEntitlement() ?? false
-                        if entitled {
-                            self.isPremiumUnlocked = true
-                            self.applyPremiumRestrictions()
-                            let done = NSAlert()
-                            done.messageText = "Thank You!"
-                            done.informativeText = "pxf Pro has been unlocked."
-                            done.alertStyle = .informational
-                            done.addButton(withTitle: "OK")
-                            await done.beginSheetModal(for: window)
-                        }
+                Task { @MainActor in
+                    let entitled = success ? (await self.storeManager?.checkEntitlement() ?? false) : false
+                    if entitled {
+                        self.isPremiumUnlocked = true
+                        self.applyPremiumRestrictions()
+                        let done = NSAlert()
+                        done.messageText = "Thank You!"
+                        done.informativeText = "pxf Pro has been unlocked."
+                        done.alertStyle = .informational
+                        done.addButton(withTitle: "OK")
+                        await done.beginSheetModal(for: window)
                     }
                 }
             }
+            let view = OfferCodeRedemptionView(state: state)
             let hostingController = NSHostingController(rootView: view)
             hostingController.view.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
             window.contentView?.addSubview(hostingController.view)
         } else {
-            // Fallback for macOS < 14: open App Store redemption page
+            // Fallback for macOS < 15: open App Store redemption page
             NSWorkspace.shared.open(URL(string: "https://apps.apple.com/redeem")!)
         }
     }
