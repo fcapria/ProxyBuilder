@@ -1849,6 +1849,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         var darDen: Int = 0
         var sourceIsProRes = false
         var sourceHasAudio = false
+        var audioStreamCodecs: [String] = []
         do {
             let probeArgs = ["ffmpeg", "-i", mxfFile.path, "-hide_banner"]
             ffmpegRunCapture(probeArgs)
@@ -1867,10 +1868,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
             if output.contains("Video: prores") {
                 sourceIsProRes = true
             }
-            // Detect if source has audio streams
+            // Detect if source has audio streams and parse per-stream codecs
             if output.contains("Audio:") {
                 sourceHasAudio = true
+                if let audioRegex = try? NSRegularExpression(pattern: #"Audio: (\w+)"#) {
+                    let matches = audioRegex.matches(in: output, range: NSRange(output.startIndex..., in: output))
+                    audioStreamCodecs = matches.compactMap { m -> String? in
+                        guard let r = Range(m.range(at: 1), in: output) else { return nil }
+                        return String(output[r])
+                    }
+                }
             }
+            self.appendLog(logURL: logURL, entry: "AUDIO PROBE: audioStreamCodecs=\(audioStreamCodecs)\n")    
             // Parse DAR (e.g. "DAR 16:9")
             let darPattern = #"DAR (\d+):(\d+)"#
             if let darRegex = try? NSRegularExpression(pattern: darPattern),
@@ -1881,6 +1890,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 darDen = Int(output[darDenRange]) ?? 0
             }
         }
+        // Build per-stream audio codec args: preserves exact codec (incl. endianness) per stream.
+        // Falls back to "-c:a copy" if probe didn't return codec names.
+        // Stream-copy audio to preserve original codec tags (lpcm) byte-for-byte.
+        let audioPerStreamArgs: (_ inputIdx: Int) -> [String] = { inputIdx in
+            guard sourceHasAudio else { return [] }
+            return ["-map", "\(inputIdx):a?", "-c:a", "copy", "-map_metadata:s:a", "\(inputIdx):s:a"]
+        }        
+        
         var isHalfSize = (self.sizePopup?.indexOfSelectedItem ?? 0) == 1
 
         // Auto-force half-size for H.264/H.265 when source exceeds VideoToolbox 4096px limit
@@ -1949,187 +1966,59 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         let mxfCodecArgs = videoCodecArgs
 
         switch outputFormat {
+
         case .quickTime:
-            // Only ProRes MOV files need AVFoundation intermediate (handles high bit-depth)
-            // Other MOV codecs (DNxHR, H.264, etc.) go direct through FFmpeg
-            let needsIntermediateConversion = mxfFile.pathExtension.lowercased() == "mov" && sourceIsProRes && videoWidth <= 4096 && videoHeight <= 4096
+            // Determine AVFoundation codec type
+            let avCodecType: AVVideoCodecType
+            switch selectedCodec {
+            case .h265:
+                avCodecType = .hevc
+            case .h264:
+                avCodecType = .h264
+            case .proresProxy:
+                avCodecType = .proRes422Proxy
+            case .dnxhrLB:
+                // DNxHR requires FFmpeg — fall through to FFmpeg path
+                avCodecType = .h264 // placeholder, won't be used
+            case .mpeg2:
+                avCodecType = .h264 // placeholder, won't be used
+            }
+
+            let sourceExt = mxfFile.pathExtension.lowercased()
+            let needsFFmpeg = selectedCodec == .dnxhrLB || selectedCodec == .mpeg2 || sourceExt == "mxf" || sourceExt == "avi" || sourceExt == "flv"
             
-            if needsIntermediateConversion {
-                // Step 1: Use AVFoundation to convert ProRes to H.264 (handles all bit depths)
-                let intermediateURL = proxyFolderURL.appendingPathComponent("\(mxfFile.deletingPathExtension().lastPathComponent)_8bit.mov")
-                
-                self.appendLog(logURL: logURL, entry: "Step 1: AVFoundation converting \(mxfFile.lastPathComponent)\n")
-                self.convertProResWithAVFoundation(inputURL: mxfFile, outputURL: intermediateURL, logURL: logURL) { [weak self] success in
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self = self else { return }
-                        if !success {
-                            self.appendLog(logURL: logURL, entry: "FAILED (AVFoundation conversion): \(mxfFile.lastPathComponent)\n\n")
-                            self.totalClipsQueued -= 1
-                            self.updateDropZoneAvailability()
-                            self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
-                            return
-                        }
-                        
-                        self.appendLog(logURL: logURL, entry: "Step 1 SUCCESS. Step 2: watermarking with hasWatermark=\(hasWatermark)\n")
-                        
-                        // Check for LUT file
-                        let lutEnabled = UserDefaults.standard.bool(forKey: "lutEnabled")
-                        let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
-                        let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
-                        let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
-                        if lutEnabled && !hasLUT {
-                            self.appendLog(logURL: logURL, entry: "WARNING: LUT enabled but file not found: \(lutPath ?? "nil")\n")
-                        }
-                        self.appendLog(logURL: logURL, entry: "LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
-                        
-                        // Step 2: Apply LUT and/or watermark to AVFoundation intermediate
-                        var args: [String]
-                        if hasImageWatermark {
-                            // Build filter chain with optional LUT and image watermark
-                            var filterChain = "[0:v]"
-                            if hasLUT {
-                                filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
-                            }
-                            filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(h264PixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.50[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
-
-                            args = [
-                                "-i", intermediateURL.path,
-                                "-i", watermarkURL!.path,
-                                "-i", mxfFile.path,
-                                "-filter_complex", filterChain,
-                                "-map", "2:d?",
-                                "-c:d", "copy",
-                                "-map", "[v]",
-                            ] + (sourceHasAudio ? ["-map", "2:a?", "-c:a", "copy", "-map_metadata:s:a", "2:s:a"] : []) + [
-                                "-c:v", h264Codec,
-                                "-b:v", "10M",
-                                "-sn",
-                                outputFileURL.path
-                            ]
-                        } else if hasCustomTextWatermark {
-                            // Build filter chain with optional scale, LUT and custom text watermark
-                            var filterChain = scalePrefix
-                            if hasLUT {
-                                filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
-                            }
-                            // Custom text: centered horizontally, 10% up from bottom, white at 50% opacity
-                            // Font size: 144 for height > 1800, 72 otherwise
-                            filterChain += "drawtext=fontfile=\(fontFile):text=\(escapedCustomText):fontsize=if(gt(h\\,1800)\\,144\\,72):fontcolor=white@0.5:x=(w-text_w)/2:y=h*9/10-text_h"
-
-                            self.appendLog(logURL: logURL, entry: "MOV->QT CUSTOM TEXT PATH: filterChain=\(filterChain)\n")
-
-                            args = [
-                                "-i", intermediateURL.path,
-                                "-i", mxfFile.path,
-                                "-vf", filterChain,
-                                "-map", "1:d?",
-                                "-c:d", "copy",
-                                "-map", "0:v",
-                            ] + (sourceHasAudio ? ["-map", "1:a?", "-c:a", "copy", "-map_metadata:s:a", "1:s:a"] : []) + [
-                                "-c:v", h264Codec,
-                                "-b:v", "10M",
-                                "-sn",
-                                outputFileURL.path
-                            ]
-                        } else {
-                            // No watermark, but may have LUT
-                            if hasLUT {
-                                args = [
-                                    "-i", intermediateURL.path,
-                                    "-i", mxfFile.path,
-                                    "-vf", "\(scalePrefix)lut3d=file=\(escapePathForFFmpegFilter(lutPath!))",
-                                    "-map", "1:d?",
-                                    "-c:d", "copy",
-                                    "-map", "0:v",
-                                ] + (sourceHasAudio ? ["-map", "1:a?", "-c:a", "copy", "-map_metadata:s:a", "1:s:a"] : []) + [
-                                    "-c:v", h264Codec,
-                                    "-b:v", "10M",
-                                    "-sn",
-                                    outputFileURL.path
-                                ]
-                            } else {
-                                let vfArgs: [String] = isHalfSize ? ["-vf", "scale=trunc(iw/4)*2:trunc(ih/4)*2:flags=bicubic:out_color_matrix=bt709"] : []
-                                args = [
-                                    "-i", intermediateURL.path,
-                                    "-i", mxfFile.path,
-                                ] + vfArgs + [
-                                    "-map", "1:d?",
-                                    "-c:d", "copy",
-                                    "-map", "0:v",
-                                ] + (sourceHasAudio ? ["-map", "1:a?", "-c:a", "copy", "-map_metadata:s:a", "1:s:a"] : []) + [
-                                    "-c:v", h264Codec,
-                                    "-b:v", "10M",
-                                    "-sn",
-                                    outputFileURL.path
-                                ]
-                            }
-                        }
-                        
-                        self.runProcessDetached(arguments: args, logURL: logURL) { [weak self] status2 in
-                            DispatchQueue.main.async { [weak self] in
-                                guard let self = self else { return }
-                                if status2 != 0 {
-                                    self.appendLog(logURL: logURL, entry: "FAILED (watermark): \(mxfFile.lastPathComponent)\n\n")
-                                }
-                                // Clean up intermediate file
-                                try? FileManager.default.removeItem(at: intermediateURL)
-                                self.totalClipsQueued -= 1
-                                self.updateDropZoneAvailability()
-                                self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Single-pass for MXF files
-                // Check for LUT
+            if needsFFmpeg {
+                // DNxHR and MPEG-2 still use FFmpeg single-pass
                 let lutEnabled = UserDefaults.standard.bool(forKey: "lutEnabled")
                 let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
                 let lutPath = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
                 let hasLUT = lutEnabled && lutPath != nil && FileManager.default.fileExists(atPath: lutPath!)
-                if lutEnabled && !hasLUT {
-                    self.appendLog(logURL: logURL, entry: "WARNING: LUT enabled but file not found: \(lutPath ?? "nil")\n")
-                }
-                self.appendLog(logURL: logURL, entry: "MXF->QT: LUT check: lutEnabled=\(lutEnabled), lutFilename=\(lutFilename ?? "nil"), hasLUT=\(hasLUT)\n")
 
                 var args = (forceOverwrite || self.overwriteAllFiles) ? ["-y", "-i", mxfFile.path] : ["-i", mxfFile.path]
                 var videoFilterArgs: [String]
                 var videoMapArgs: [String]
 
-                self.appendLog(logURL: logURL, entry: "MXF->QT: Watermark check: hasImageWatermark=\(hasImageWatermark), hasCustomTextWatermark=\(hasCustomTextWatermark), escapedCustomText='\(escapedCustomText)'\n")
-
                 if hasImageWatermark {
-                    // Add watermark input
                     args += ["-i", watermarkURL!.path]
-
-                    // Build filter chain with optional LUT and image watermark
                     var filterChain = "[0:v]"
                     if hasLUT {
                         filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
                     filterChain += "scale=\(videoScaleExpr):flags=bicubic:out_color_matrix=bt709,format=\(videoPixelFormat)[v0];[1:v]\(wmScaleFilter),format=rgba,colorchannelmixer=aa=0.50[wm];[v0][wm]overlay=W-w-\(wmPadX):H-h-\(wmPadY)[v]"
-
                     videoFilterArgs = ["-filter_complex", filterChain]
                     videoMapArgs = ["-map", "[v]"]
                 } else if hasCustomTextWatermark {
-                    // Build filter chain with optional scale, LUT and custom text watermark
                     var filterChain = scalePrefix
                     if hasLUT {
                         filterChain += "lut3d=file=\(escapePathForFFmpegFilter(lutPath!)),"
                     }
-                    // Custom text: centered horizontally, 10% up from bottom, white at 50% opacity
                     filterChain += "drawtext=fontfile=\(fontFile):text=\(escapedCustomText):fontsize=if(gt(h\\,1800)\\,144\\,72):fontcolor=white@0.5:x=(w-text_w)/2:y=h*9/10-text_h"
-
-                    self.appendLog(logURL: logURL, entry: "MXF->QT CUSTOM TEXT: filterChain=\(filterChain)\n")
-
                     videoFilterArgs = ["-vf", filterChain]
                     videoMapArgs = ["-map", "0:v"]
                 } else if hasLUT {
-                    // LUT only, no watermark
                     videoFilterArgs = ["-vf", "\(scalePrefix)lut3d=file=\(escapePathForFFmpegFilter(lutPath!))"]
                     videoMapArgs = ["-map", "0:v"]
                 } else {
-                    // No watermark, no LUT
                     if isHalfSize {
                         videoFilterArgs = ["-vf", "scale=trunc(iw/4)*2:trunc(ih/4)*2:flags=bicubic:out_color_matrix=bt709"]
                     } else {
@@ -2141,15 +2030,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                 args += videoFilterArgs
                 args += videoMapArgs
                 args += quickTimeCodecArgs
-                args += [
-                    "-map", "0:a?",
-                    "-c:a", "copy",
-                    "-map_metadata", "0",
-                    "-sn",
-                    outputFileURL.path
-                ]
-
-                self.appendLog(logURL: logURL, entry: "MXF->QT FULL ARGS: \(args.joined(separator: " "))\n")
+                args += ["-map", "0:a?", "-c:a", "copy", "-map_metadata", "0", "-sn", outputFileURL.path]
 
                 runProcessDetached(arguments: args, logURL: logURL) { [weak self] status in
                     DispatchQueue.main.async { [weak self] in
@@ -2162,7 +2043,54 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
                         self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
                     }
                 }
+            } else {
+                // AVFoundation path — H.264, HEVC, ProRes Proxy
+                let lutEnabled = UserDefaults.standard.bool(forKey: "lutEnabled")
+                let lutFilename = UserDefaults.standard.string(forKey: "lutFilePath")
+                let lutPathFull = lutFilename != nil ? self.getLUTDirectoryURL().appendingPathComponent(lutFilename!).path : nil
+                let hasLUT = lutEnabled && lutPathFull != nil && FileManager.default.fileExists(atPath: lutPathFull!)
+                let effectiveLUTPath = hasLUT ? lutPathFull : nil
+
+                let targetW: Int? = isHalfSize ? (videoWidth / 2 / 2 * 2) : nil  // round down to even
+                let targetH: Int? = isHalfSize ? (videoHeight / 2 / 2 * 2) : nil
+
+                let wmText: String? = hasCustomTextWatermark ? customWatermarkText : nil
+                let wmImageURL: URL? = hasImageWatermark ? watermarkURL : nil
+
+                self.appendLog(logURL: logURL, entry: "AVF encode: \(mxfFile.lastPathComponent) → \(selectedCodec.displayName), LUT=\(hasLUT), watermark=\(hasWatermark), halfSize=\(isHalfSize)\n")
+
+                // Remove existing output if overwriting
+                if forceOverwrite || self.overwriteAllFiles {
+                    try? FileManager.default.removeItem(at: outputFileURL)
+                }
+
+                self.encodeWithAVFoundation(
+                    inputURL: mxfFile,
+                    outputURL: outputFileURL,
+                    codecType: avCodecType,
+                    targetWidth: targetW,
+                    targetHeight: targetH,
+                    lutPath: effectiveLUTPath,
+                    watermarkImageURL: wmImageURL,
+                    watermarkText: wmText,
+                    watermarkPadX: wmPadX,
+                    watermarkPadY: wmPadY,
+                    watermarkHeightPercent: 15 / sizeDiv,
+                    logURL: logURL
+                ) { [weak self] success in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        if !success {
+                            self.appendLog(logURL: logURL, entry: "FAILED: \(mxfFile.lastPathComponent)\n\n")
+                        }
+                        self.totalClipsQueued -= 1
+                        self.updateDropZoneAvailability()
+                        self.processNextFile(index: index + 1, mxfFiles: mxfFiles, proxyFolderURL: proxyFolderURL, outputFormat: outputFormat, completion: completion)
+                    }
+                }
             }
+
+
         case .mpeg4:
             // MPEG-4 output - similar to QuickTime but without data tracks (not supported in MP4)
             // Check for LUT
@@ -3638,6 +3566,434 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, DropViewDe
         return codecs[index]
     }
     
+    // MARK: - Audio disposition fix
+
+    /// Copies tkhd flags from each audio track in the source MOV to the corresponding
+    /// audio track in the proxy MOV. This preserves the original's track enabled/default
+    /// state so Premiere Pro accepts the proxy.
+    private func fixAudioDispositions(proxyURL: URL, sourceURL: URL) {
+        let sourceFlags = moovAudioTkhdFlags(url: sourceURL)
+        NSLog("[fixAudioDispositions] source=%@ sourceFlags=%@", sourceURL.lastPathComponent, sourceFlags.map { String(format:"0x%06X", $0) }.description)
+        guard !sourceFlags.isEmpty else {
+            NSLog("[fixAudioDispositions] BAIL: no source audio tracks found")
+            return
+        }
+
+        guard var proxyBytes = try? [UInt8](Data(contentsOf: proxyURL)) else {
+            NSLog("[fixAudioDispositions] BAIL: could not read proxy bytes")
+            return
+        }
+        let proxyOffsets = moovAudioTkhdFlagOffsets(in: proxyBytes)
+        NSLog("[fixAudioDispositions] proxy=%@ proxyOffsets=%@", proxyURL.lastPathComponent, proxyOffsets.description)
+        guard !proxyOffsets.isEmpty else {
+            NSLog("[fixAudioDispositions] BAIL: no proxy audio tkhd offsets found")
+            return
+        }
+
+        var changed = false
+        for i in 0..<min(sourceFlags.count, proxyOffsets.count) {
+            let sf  = sourceFlags[i]
+            let off = proxyOffsets[i]
+            guard off + 3 <= proxyBytes.count else { continue }
+            let pf = (Int(proxyBytes[off]) << 16) | (Int(proxyBytes[off+1]) << 8) | Int(proxyBytes[off+2])
+            NSLog("[fixAudioDispositions] track%d: proxyFlags=0x%06X sourceFlags=0x%06X", i, pf, sf)
+            if pf != sf {
+                proxyBytes[off]   = UInt8((sf >> 16) & 0xFF)
+                proxyBytes[off+1] = UInt8((sf >>  8) & 0xFF)
+                proxyBytes[off+2] = UInt8( sf        & 0xFF)
+                changed = true
+            }
+        }
+        NSLog("[fixAudioDispositions] changed=%d", changed ? 1 : 0)
+        if changed {
+            if let err = { () -> Error? in
+                do { try Data(proxyBytes).write(to: proxyURL, options: .atomic); return nil }
+                catch { return error }
+            }() {
+                NSLog("[fixAudioDispositions] WRITE FAILED: %@", err.localizedDescription)
+            } else {
+                NSLog("[fixAudioDispositions] write OK")
+            }
+        }
+    }
+
+    /// Reads audio track tkhd flag values from a MOV file using a streaming FileHandle
+    /// so the full media data is never loaded into memory.
+    private func moovAudioTkhdFlags(url: URL) -> [Int] {
+        guard let fh = FileHandle(forReadingAtPath: url.path) else { return [] }
+        defer { fh.closeFile() }
+        fh.seekToEndOfFile(); let fileSize = fh.offsetInFile; fh.seek(toFileOffset: 0)
+        var off: UInt64 = 0
+        while off + 8 <= fileSize {
+            fh.seek(toFileOffset: off)
+            let hdr = [UInt8](fh.readData(ofLength: 8))
+            guard hdr.count == 8 else { break }
+            let sz = UInt64(hdr[0]) << 24 | UInt64(hdr[1]) << 16 | UInt64(hdr[2]) << 8 | UInt64(hdr[3])
+            let nm = String(bytes: hdr[4..<8], encoding: .isoLatin1) ?? ""
+            guard sz >= 8 else { break }
+            if nm == "moov" {
+                let content = [UInt8](fh.readData(ofLength: Int(sz - 8)))
+                return moovAudioTkhdParse(content).map { $0.flags }
+            }
+            off += sz
+        }
+        return []
+    }
+
+    /// Returns byte offsets (within the proxy file) of the tkhd flags field for each audio track.
+    private func moovAudioTkhdFlagOffsets(in bytes: [UInt8]) -> [Int] {
+        var off = 0
+        while off + 8 <= bytes.count {
+            let sz = Int(movU32(bytes, off)); let nm = movBoxName(bytes, off)
+            guard sz >= 8 else { break }
+            if nm == "moov" {
+                let content = Array(bytes[(off+8)..<min(off+sz, bytes.count)])
+                return moovAudioTkhdParse(content).map { $0.flagOffset + off + 8 }
+            }
+            off += sz
+        }
+        return []
+    }
+
+    private struct TkhdInfo { let flagOffset: Int; let flags: Int }
+
+    /// Parses trak boxes inside moov content, returning TkhdInfo for each audio track.
+    private func moovAudioTkhdParse(_ moov: [UInt8]) -> [TkhdInfo] {
+        var result: [TkhdInfo] = []
+        var off = 0
+        while off + 8 <= moov.count {
+            let sz = Int(movU32(moov, off)); let nm = movBoxName(moov, off)
+            guard sz >= 8 else { break }
+            if nm == "trak" {
+                var tkhdOff: Int? = nil; var handler: String? = nil
+                var tOff = off + 8; let tEnd = off + sz
+                while tOff + 8 <= tEnd {
+                    let sz2 = Int(movU32(moov, tOff)); let nm2 = movBoxName(moov, tOff)
+                    guard sz2 >= 8 else { break }
+                    if nm2 == "tkhd", tOff + 12 <= moov.count { tkhdOff = tOff + 9 }
+                    if nm2 == "mdia" {
+                        var mOff = tOff + 8; let mEnd = tOff + sz2
+                        while mOff + 8 <= mEnd {
+                            let sz3 = Int(movU32(moov, mOff)); let nm3 = movBoxName(moov, mOff)
+                            guard sz3 >= 8 else { break }
+                            if nm3 == "hdlr", mOff + 20 <= moov.count {
+                                handler = String(bytes: moov[(mOff+16)..<(mOff+20)], encoding: .isoLatin1)
+                            }
+                            mOff += sz3
+                        }
+                    }
+                    tOff += sz2
+                }
+                if handler == "soun", let fo = tkhdOff, fo + 3 <= moov.count {
+                    let flags = (Int(moov[fo]) << 16) | (Int(moov[fo+1]) << 8) | Int(moov[fo+2])
+                    result.append(TkhdInfo(flagOffset: fo, flags: flags))
+                }
+            }
+            off += sz
+        }
+        return result
+    }
+
+    private func movU32(_ b: [UInt8], _ o: Int) -> UInt32 {
+        guard o + 4 <= b.count else { return 0 }
+        return UInt32(b[o]) << 24 | UInt32(b[o+1]) << 16 | UInt32(b[o+2]) << 8 | UInt32(b[o+3])
+    }
+    private func movBoxName(_ b: [UInt8], _ o: Int) -> String {
+        guard o + 8 <= b.count else { return "" }
+        return String(bytes: b[(o+4)..<(o+8)], encoding: .isoLatin1) ?? ""
+    }
+
+// REPLACEMENT for encodeWithAVFoundation in main.swift
+// Find the existing encodeWithAVFoundation function and replace it entirely with this.
+
+    private func encodeWithAVFoundation(
+        inputURL: URL,
+        outputURL: URL,
+        codecType: AVVideoCodecType,
+        targetWidth: Int?,
+        targetHeight: Int?,
+        lutPath: String?,
+        watermarkImageURL: URL?,
+        watermarkText: String?,
+        watermarkPadX: Int,
+        watermarkPadY: Int,
+        watermarkHeightPercent: Int,
+        logURL: URL,
+        completion: @escaping (Bool) -> Void
+    ) {
+        let asset = AVURLAsset(url: inputURL)
+        let parsedLUT = lutPath != nil ? self.parseCubeLUT(at: lutPath!) : nil
+        let logURLCapture = logURL
+
+        asset.loadValuesAsynchronously(forKeys: ["tracks", "duration"]) { [weak self] in
+            guard let self = self else { return }
+
+            var error: NSError?
+            let status = asset.statusOfValue(forKey: "tracks", error: &error)
+            guard status == .loaded else {
+                self.appendLog(logURL: logURLCapture, entry: "AVF encode: failed to load asset tracks: \(error?.localizedDescription ?? "unknown")\n")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            let videoTracks = asset.tracks(withMediaType: .video)
+            let audioTracks = asset.tracks(withMediaType: .audio)
+
+            guard let sourceVideoTrack = videoTracks.first else {
+                self.appendLog(logURL: logURLCapture, entry: "AVF encode: no video track found\n")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            let sourceSize = sourceVideoTrack.naturalSize
+            let sourceTransform = sourceVideoTrack.preferredTransform
+            let nominalFrameRate = sourceVideoTrack.nominalFrameRate
+
+            let outputWidth = targetWidth ?? Int(sourceSize.width)
+            let outputHeight = targetHeight ?? Int(sourceSize.height)
+
+            // Delete existing output
+            try? FileManager.default.removeItem(at: outputURL)
+
+            // --- AVAssetReader ---
+            let reader: AVAssetReader
+            do {
+                reader = try AVAssetReader(asset: asset)
+            } catch {
+                self.appendLog(logURL: logURLCapture, entry: "AVF encode: failed to create reader: \(error.localizedDescription)\n")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            // Video composition with CIFilter handler
+            let videoComposition = AVMutableVideoComposition(asset: asset, applyingCIFiltersWithHandler: { [weak self] request in
+                var image = request.sourceImage.clampedToExtent()
+
+                // 1. Apply LUT
+                if let (dimension, cubeData) = parsedLUT {
+                    let lutFilter = CIFilter(name: "CIColorCubeWithColorSpace")!
+                    lutFilter.setValue(image, forKey: kCIInputImageKey)
+                    lutFilter.setValue(dimension, forKey: "inputCubeDimension")
+                    lutFilter.setValue(cubeData, forKey: "inputCubeData")
+                    lutFilter.setValue(CGColorSpace(name: CGColorSpace.sRGB)!, forKey: "inputColorSpace")
+                    if let output = lutFilter.outputImage {
+                        image = output.clampedToExtent()
+                    }
+                }
+
+                // 2. Apply image watermark
+                if let wmURL = watermarkImageURL,
+                   let wmImage = CIImage(contentsOf: wmURL) {
+                    let sourceExtent = request.sourceImage.extent
+                    let wmTargetHeight = CGFloat(max(Int(sourceExtent.height) * watermarkHeightPercent / 100, 1))
+                    let wmScale = wmTargetHeight / wmImage.extent.height
+                    let scaledWM = wmImage.transformed(by: CGAffineTransform(scaleX: wmScale, y: wmScale))
+                    let alphaWM = scaledWM.applyingFilter("CIColorMatrix", parameters: [
+                        "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.5)
+                    ])
+                    let wmX = sourceExtent.width - scaledWM.extent.width - CGFloat(watermarkPadX)
+                    let wmY = CGFloat(watermarkPadY)
+                    let positionedWM = alphaWM.transformed(by: CGAffineTransform(translationX: wmX, y: wmY))
+                    let composite = CIFilter(name: "CISourceOverCompositing")!
+                    composite.setValue(positionedWM, forKey: kCIInputImageKey)
+                    composite.setValue(image, forKey: kCIInputBackgroundImageKey)
+                    if let output = composite.outputImage {
+                        image = output.clampedToExtent()
+                    }
+                }
+
+                // 3. Apply text watermark
+                if let text = watermarkText, !text.isEmpty {
+                    let sourceExtent = request.sourceImage.extent
+                    let fontSize: CGFloat = sourceExtent.height > 1800 ? 144 : 72
+                    let font = NSFont(name: "Helvetica", size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
+                    let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+                    let textGen = CIFilter(name: "CIAttributedTextImageGenerator")!
+                    textGen.setValue(NSAttributedString(string: text, attributes: attrs), forKey: "inputText")
+                    textGen.setValue(NSNumber(value: Double(fontSize) / 12.0), forKey: "inputScaleFactor")
+                    if let textImage = textGen.outputImage {
+                        let alphaText = textImage.applyingFilter("CIColorMatrix", parameters: [
+                            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.5)
+                        ])
+                        let textX = (sourceExtent.width - textImage.extent.width) / 2
+                        let textY = sourceExtent.height * 0.1
+                        let positionedText = alphaText.transformed(by: CGAffineTransform(translationX: textX, y: textY))
+                        let composite = CIFilter(name: "CISourceOverCompositing")!
+                        composite.setValue(positionedText, forKey: kCIInputImageKey)
+                        composite.setValue(image, forKey: kCIInputBackgroundImageKey)
+                        if let output = composite.outputImage {
+                            image = output.clampedToExtent()
+                        }
+                    }
+                }
+
+                let finalImage = image.cropped(to: request.sourceImage.extent)
+                request.finish(with: finalImage, context: nil)
+            })
+
+            videoComposition.renderSize = CGSize(width: outputWidth, height: outputHeight)
+            if nominalFrameRate > 0 {
+                videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(nominalFrameRate))
+            }
+
+            let videoOutput = AVAssetReaderVideoCompositionOutput(
+                videoTracks: videoTracks,
+                videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+            )
+            videoOutput.videoComposition = videoComposition
+            reader.add(videoOutput)
+
+            // Audio reader outputs — nil settings = passthrough (preserves codec tags)
+            var audioReaderOutputs: [AVAssetReaderTrackOutput] = []
+            for audioTrack in audioTracks {
+                let audioOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
+                reader.add(audioOutput)
+                audioReaderOutputs.append(audioOutput)
+            }
+
+            // --- AVAssetWriter ---
+            let writer: AVAssetWriter
+            do {
+                writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+            } catch {
+                self.appendLog(logURL: logURLCapture, entry: "AVF encode: failed to create writer: \(error.localizedDescription)\n")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            // Video writer input
+            var videoSettings: [String: Any] = [
+                AVVideoCodecKey: codecType,
+                AVVideoWidthKey: outputWidth,
+                AVVideoHeightKey: outputHeight,
+            ]
+            if codecType == .h264 || codecType == .hevc {
+                videoSettings[AVVideoCompressionPropertiesKey] = [
+                    AVVideoAverageBitRateKey: 10_000_000,
+                ]
+            }
+
+            let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+            videoInput.expectsMediaDataInRealTime = false
+            videoInput.transform = sourceTransform
+            writer.add(videoInput)
+
+            // Audio writer inputs — nil outputSettings = passthrough
+            var audioWriterInputs: [AVAssetWriterInput] = []
+            for audioTrack in audioTracks {
+                let formatDescriptions = audioTrack.formatDescriptions as! [CMFormatDescription]
+                let audioInput = AVAssetWriterInput(
+                    mediaType: .audio,
+                    outputSettings: nil,
+                    sourceFormatHint: formatDescriptions.first
+                )
+                audioInput.expectsMediaDataInRealTime = false
+                writer.add(audioInput)
+                audioWriterInputs.append(audioInput)
+            }
+
+            // --- Start ---
+            guard reader.startReading() else {
+                self.appendLog(logURL: logURLCapture, entry: "AVF encode: reader failed: \(reader.error?.localizedDescription ?? "unknown")\n")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            guard writer.startWriting() else {
+                self.appendLog(logURL: logURLCapture, entry: "AVF encode: writer failed: \(writer.error?.localizedDescription ?? "unknown")\n")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            writer.startSession(atSourceTime: .zero)
+
+            // --- Process using requestMediaDataWhenReadyOnQueue ---
+            let processingQueue = DispatchQueue(label: "com.frankcapria.pxf.avfencode")
+            let group = DispatchGroup()
+
+            // Video
+            group.enter()
+            videoInput.requestMediaDataWhenReady(on: processingQueue) {
+                while videoInput.isReadyForMoreMediaData {
+                    if let sampleBuffer = videoOutput.copyNextSampleBuffer() {
+                        videoInput.append(sampleBuffer)
+                    } else {
+                        videoInput.markAsFinished()
+                        group.leave()
+                        return
+                    }
+                }
+            }
+
+            // Audio — one per track
+            for i in 0..<audioWriterInputs.count {
+                let audioInput = audioWriterInputs[i]
+                let audioOutput = audioReaderOutputs[i]
+                group.enter()
+                let audioQueue = DispatchQueue(label: "com.frankcapria.pxf.audio\(i)")
+                audioInput.requestMediaDataWhenReady(on: audioQueue) {
+                    while audioInput.isReadyForMoreMediaData {
+                        if let sampleBuffer = audioOutput.copyNextSampleBuffer() {
+                            audioInput.append(sampleBuffer)
+                        } else {
+                            audioInput.markAsFinished()
+                            group.leave()
+                            return
+                        }
+                    }
+                }
+            }
+
+            // When all inputs are finished, finalize
+            group.notify(queue: processingQueue) {
+                writer.finishWriting {
+                    let success = writer.status == .completed
+                    if !success {
+                        self.appendLog(logURL: logURLCapture, entry: "AVF encode: writer error: \(writer.error?.localizedDescription ?? "unknown")\n")
+                    } else {
+                        self.appendLog(logURL: logURLCapture, entry: "AVF encode: SUCCESS → \(outputURL.lastPathComponent)\n")
+                    }
+                    DispatchQueue.main.async { completion(success) }
+                }
+            }
+        }
+    }
+    /// Parses a .cube LUT file and returns (dimension, float array) for CIColorCubeWithColorSpace.
+    /// Returns nil if the file can't be parsed.
+    private func parseCubeLUT(at path: String) -> (Int, Data)? {
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let lines = content.components(separatedBy: .newlines)
+        var dimension = 0
+        var cubeData: [Float] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") || trimmed.hasPrefix("TITLE") { continue }
+            if trimmed.hasPrefix("DOMAIN_MIN") || trimmed.hasPrefix("DOMAIN_MAX") { continue }
+            if trimmed.hasPrefix("LUT_3D_SIZE") {
+                let parts = trimmed.split(separator: " ")
+                if parts.count >= 2, let d = Int(parts[1]) { dimension = d }
+                continue
+            }
+            // Data line: R G B
+            let parts = trimmed.split(separator: " ")
+            if parts.count >= 3,
+               let r = Float(parts[0]),
+               let g = Float(parts[1]),
+               let b = Float(parts[2]) {
+                cubeData.append(r)
+                cubeData.append(g)
+                cubeData.append(b)
+                cubeData.append(1.0) // alpha
+            }
+        }
+
+        guard dimension > 0, cubeData.count == dimension * dimension * dimension * 4 else { return nil }
+        let data = cubeData.withUnsafeBufferPointer { Data(buffer: $0) }
+        return (dimension, data)
+    }
+
+
     private func convertProResWithAVFoundation(inputURL: URL, outputURL: URL, logURL: URL, completion: @escaping (Bool) -> Void) {
         let asset = AVURLAsset(url: inputURL)
         
