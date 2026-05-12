@@ -1,6 +1,7 @@
 import StoreKit
 import SwiftUI
 
+@MainActor
 class StoreManager {
     static let productID = "com.frankcapria.pxf.pro"
     private var product: Product?
@@ -62,13 +63,15 @@ class StoreManager {
     }
 
     func listenForTransactions() {
-        updateTask = Task {
+        updateTask = Task { [weak self] in
             for await result in Transaction.updates {
                 if let transaction = try? result.payloadValue {
                     await transaction.finish()
                     if transaction.productID == StoreManager.productID {
                         let entitled = transaction.revocationDate == nil
-                        onPurchaseUpdate?(entitled)
+                        await MainActor.run {
+                            self?.onPurchaseUpdate?(entitled)
+                        }
                     }
                 }
             }
@@ -82,7 +85,7 @@ class StoreManager {
 
 @available(macOS 15.0, *)
 class OfferCodeState: ObservableObject {
-    @Published var isPresented: Bool = true
+    @Published var isPresented: Bool = false
     var onComplete: (Bool) -> Void = { _ in }
 }
 
